@@ -1,41 +1,42 @@
-# Environment and Runbook (Dev + Staging)
+# 环境与运行手册（开发 + 预发）
 
-## 1. Environment Matrix
-| Item | Dev | Staging |
+## 1. 环境矩阵
+| 项目 | 开发环境 | 预发环境 |
 |---|---|---|
-| PostgreSQL | local/docker | managed/shared |
-| Redis | local/docker | managed/shared |
-| OpenHarness | local test endpoint | staging endpoint |
-| Log level | debug | info |
+| PostgreSQL | 本地或 Docker | 托管或共享实例 |
+| Redis | 本地或 Docker | 托管或共享实例 |
+| OpenHarness | 本地测试地址 | 预发地址 |
+| 日志级别 | debug | info |
 
-## 2. Required Variables
-| Env | Required | Example |
-|---|---|---|
-| `DATABASE_URL` | yes | `postgresql://...` |
-| `REDIS_URL` | yes | `redis://...` |
-| `JWT_SECRET_KEY` | phase2 | `...` |
-| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | phase2 | `15` |
-| `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | phase2 | `7` |
-| `OH_BASE_URL` | yes | `http://localhost:8080` |
-| `OH_API_KEY` | yes | `sk-...` |
-| `OH_DEFAULT_WORKFLOW` | yes | `labor_consultation` |
-| `APP_ENABLE_LOCAL_RULE_FALLBACK` | yes | `false` |
+## 2. 关键环境变量
+| 变量 | 必填 | 示例 | 说明 |
+|---|---|---|---|
+| `storage_backend` | 是 | `memory` / `postgres` | 存储后端切换 |
+| `database_url` | `postgres` 模式必填 | `postgresql://...` | PostgreSQL 连接串 |
+| `redis_url` | `postgres` 模式必填 | `redis://...` | Redis 连接串 |
+| `auth_mode` | 是 | `anonymous` / `jwt` | 认证模式 |
+| `jwt_secret_key` | `jwt` 模式必填 | `change-me` | JWT 签名密钥 |
+| `oh_base_url` | 是 | `http://localhost:8080` | OpenHarness 地址 |
+| `oh_stream_path` | 是 | `/api/v1/stream-run` | OpenHarness 流端点 |
+| `oh_api_key` | 是 | `sk-...` | OpenHarness 凭证 |
+| `oh_use_mock` | 是 | `true` | 是否启用 mock |
+| `app_enable_local_rule_fallback` | 是 | `false` | 本地规则回退开关 |
 
-## 3. Startup Checklist
-1. DB and Redis reachable.
-2. Migrations applied.
-3. OpenHarness endpoint health check passes.
-4. Anonymous token flow validates.
-5. `/cases` and `/sessions/*/chat` smoke test passes.
+## 3. 启动检查清单
+1. PostgreSQL 与 Redis 连通性正常（仅 `postgres` 模式）。
+2. 执行建表脚本：`backend/sql/init_schema.sql`。
+3. OpenHarness 连通检查通过（或已启用 `oh_use_mock=true`）。
+4. 匿名模式或 JWT 模式鉴权流程可用。
+5. `/cases` 与 `/sessions/{id}/chat` smoke 脚本通过。
 
-## 4. Daily Ops Checklist
-- Check stream error ratio.
-- Check lock conflicts (`SESSION_LOCKED`) trend.
-- Check dependency failures (`OH_SERVICE_ERROR`, `SERVICE_UNAVAILABLE`).
-- Check fallback flag count (should remain near zero).
+## 4. 日常巡检清单
+- 关注流式错误率与 5xx 比例。
+- 关注 `SESSION_LOCKED` 异常趋势。
+- 关注 `RATE_LIMITED` 是否异常抬升。
+- 关注 `OH_SERVICE_ERROR` 与依赖可用性。
 
-## 5. Incident Handling (L1)
-1. Capture `trace_id` and endpoint.
-2. Classify as auth/lock/rate/dependency.
-3. If dependency outage, switch status page and degrade response message.
-4. Confirm recovery with smoke tests.
+## 5. 故障处理（L1）
+1. 收集 `trace_id`、owner、endpoint、时间窗口。
+2. 归类故障：认证/限流/锁冲突/依赖异常。
+3. 依赖故障时启用降级提示并暂停风险发布。
+4. 恢复后执行 smoke 脚本确认主链路可用。

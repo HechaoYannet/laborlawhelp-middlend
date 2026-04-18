@@ -11,8 +11,6 @@ from app.services.session_service import get_session
 
 async def stream_chat(owner: Owner, session_id: str, request: ChatRequest):
     session = await get_session(owner, session_id)
-    if session.status != "active":
-        raise AppError(410, "ANONYMOUS_SESSION_EXPIRED", "游客会话已过期或结束")
 
     async with store.acquire_session_lock(session_id):
         try:

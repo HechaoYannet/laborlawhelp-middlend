@@ -1,51 +1,63 @@
-# Test Plan (M3 Gate)
+# 测试计划（M3 准入）
 
-## 1. Test Scope
-- API contract correctness
-- SSE stream ordering and stability
-- Ownership and auth checks
-- Concurrency lock behavior
-- Rate limit behavior
-- Dependency failure behavior
-- Migration safety checks
+## 1. 测试范围
+- API 契约一致性
+- SSE 流事件顺序与稳定性
+- owner 归属与认证校验
+- 会话并发锁行为
+- 限流行为
+- 依赖故障与降级行为
+- 游客迁移安全性
 
-## 2. Functional Cases
-| ID | Case | Expected |
+## 2. 功能用例
+| ID | 场景 | 预期 |
 |---|---|---|
-| F-01 | create case -> create session -> chat | full success flow |
-| F-02 | access foreign session | `403 FORBIDDEN` |
-| F-03 | invalid payload | `400 BAD_REQUEST` |
-| F-04 | end session then chat | proper session status handling |
+| F-01 | 创建案件 -> 创建会话 -> 发起聊天 | 主链路成功 |
+| F-02 | 跨 owner 访问案件/会话 | 返回 `403 FORBIDDEN` |
+| F-03 | 非法请求体 | 返回 `400 BAD_REQUEST` |
+| F-04 | 会话结束后继续聊天 | 返回会话过期/结束错误 |
 
-## 3. SSE Cases
-| ID | Case | Expected |
+## 3. SSE 用例
+| ID | 场景 | 预期 |
 |---|---|---|
-| S-01 | normal stream | ordered events end with `message_end` |
-| S-02 | chunk split | parser still reconstructs frames |
-| S-03 | reconnect with seq | no duplicate rendering |
-| S-04 | stream error | emits `error` frame with retryable flag |
+| S-01 | 正常流 | 按顺序到达并以 `message_end` 结束 |
+| S-02 | 分片传输 | 客户端可正确重组帧 |
+| S-03 | `seq` 顺序校验 | 不出现倒序渲染 |
+| S-04 | 流内错误 | 收到 `error` 事件且携带 `retryable` |
 
-## 4. Concurrency and Rate
-| ID | Case | Expected |
+## 4. 并发与限流
+| ID | 场景 | 预期 |
 |---|---|---|
-| C-01 | parallel chat same session | one request gets `409 SESSION_LOCKED` |
-| C-02 | high-frequency requests | `429 RATE_LIMITED` with retry hint |
+| C-01 | 同会话并发发言 | 返回 `409 SESSION_LOCKED` |
+| C-02 | 高频请求 | 返回 `429 RATE_LIMITED` |
 
-## 5. Failure Injection
-| ID | Case | Expected |
+## 5. 故障注入
+| ID | 场景 | 预期 |
 |---|---|---|
-| X-01 | OpenHarness timeout | `500/503` mapped and audited |
-| X-02 | Redis unavailable | safe fail path, no partial stream corruption |
+| X-01 | OpenHarness 超时/异常 | 映射为 `OH_SERVICE_ERROR` |
+| X-02 | Redis 不可用 | 降级路径可用且不破坏主链路 |
 
-## 6. Performance Baseline (Staging Gate)
-| Metric | Threshold |
+## 6. 性能基线（预发门槛）
+| 指标 | 阈值 |
 |---|---|
-| Concurrent sessions | >= 200 sustained |
-| First token latency p95 | <= 2.5s |
-| Full response latency p95 | <= 12s |
-| Stream error rate | <= 1.0% |
-| 5xx rate | <= 0.5% |
+| 并发会话数 | >= 200 持续 |
+| 首 token 延迟 p95 | <= 2.5s |
+| 全量响应延迟 p95 | <= 12s |
+| 流错误率 | <= 1.0% |
+| 5xx 比例 | <= 0.5% |
 
-## 7. Entry and Exit Criteria
-- Entry: APIs deployed to staging and observability enabled.
-- Exit: all P0/P1 tests pass and performance thresholds met.
+## 7. 自动化 pytest 映射
+| 自动化用例 | 文件 |
+|---|---|
+| 主链路、权限、会话、限流、JWT | `backend/tests/test_smoke.py` |
+
+执行命令：
+
+```powershell
+cd backend
+python -m pytest -q
+```
+
+## 8. 准入与退出标准
+- 准入：接口已部署到测试环境，日志与监控可用。
+- 退出：P0/P1 全部通过，且性能基线达标。

@@ -1,26 +1,37 @@
-# Middlend Backend Scaffold
+# 中间件后端说明（第二批实现）
 
-## 1. Install
+## 1. 环境安装
+
+### 1.1 venv 方式
 
 ```powershell
 cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-## 2. Run API
+### 1.2 conda 方式（可选）
+
+```powershell
+cd backend
+conda create -n laborlawhelp-middlend python=3.11 -y
+conda activate laborlawhelp-middlend
+python -m pip install -r requirements.txt
+```
+
+## 2. 启动 API
 
 ```powershell
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-## 2.1 Runtime Modes
+## 3. 运行模式
 
-- `storage_backend=memory` (default): in-memory store for fast local integration.
-- `storage_backend=postgres`: PostgreSQL + Redis mode.
+- `storage_backend=memory`（默认）：内存模式，适合本地快速联调。
+- `storage_backend=postgres`：PostgreSQL + Redis 模式，适合开发/预发。
 
-Example `.env` for postgres mode:
+`postgres` 模式示例 `.env`：
 
 ```env
 storage_backend=postgres
@@ -31,44 +42,50 @@ auth_mode=anonymous
 jwt_secret_key=change-me
 ```
 
-Initialize schema:
+初始化数据库：
 
 ```powershell
 psql -d laborlawhelp -f .\sql\init_schema.sql
 ```
 
-## 3. Run Tests
+## 4. pytest 测试
 
 ```powershell
-pytest -q
+python -m pytest -q
 ```
 
-## 3.1 JWT Phase-2 Switch
+当前测试覆盖：
+- 主链路（创建案件 -> 创建会话 -> 流式聊天）
+- 权限隔离（跨 owner 访问拒绝）
+- 会话结束后聊天
+- 消息列表回读
+- 限流触发
+- JWT 模式登录与刷新
 
-Set in `.env`:
+## 5. JWT 二期开关
+
+`.env` 设置：
 
 ```env
 auth_mode=jwt
 ```
 
-Auth endpoints:
+认证接口：
 - POST `/api/v1/auth/sms/send`
 - POST `/api/v1/auth/sms/login`
 - POST `/api/v1/auth/refresh`
 - POST `/api/v1/auth/logout`
 
-Use `Authorization: Bearer <access_token>` for protected endpoints when `auth_mode=jwt`.
+当 `auth_mode=jwt` 时，业务接口必须携带 `Authorization: Bearer <access_token>`。
 
-## 4. Smoke Script
-
-In another terminal:
+## 6. 烟雾测试脚本
 
 ```powershell
 cd scripts
 .\smoke-chat.ps1
 ```
 
-## 5. Implemented Endpoints
+## 7. 已实现端点
 - POST `/api/v1/cases`
 - GET `/api/v1/cases`
 - GET `/api/v1/cases/{case_id}`
@@ -82,7 +99,7 @@ cd scripts
 - POST `/api/v1/auth/refresh`
 - POST `/api/v1/auth/logout`
 
-## 6. Anonymous Migration Scripts
+## 8. 游客迁移脚本
 
 ```powershell
 python .\scripts\migrate_anonymous_to_user.py --database-url "postgresql://postgres:postgres@127.0.0.1:5432/laborlawhelp" --anonymous-id "anon-1" --user-id "00000000-0000-0000-0000-000000000001"
