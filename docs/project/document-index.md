@@ -9,7 +9,9 @@
 
 ## 3. Development Guides
 - `docs/guide/frontend-integration.md`
+- `docs/guide/laborlawhelp-frontend-integration-playbook.md`
 - `docs/guide/backend-implementation.md`
+- `docs/guide/openharness-module-development-and-integration.md`
 
 ## 4. Data Layer
 - `docs/database/schema-and-migration.md`
@@ -32,7 +34,8 @@
 1. `docs/api/api-contract.md`
 2. `docs/api/error-codes.md`
 3. `docs/guide/frontend-integration.md`
-4. `docs/project/test-plan.md`
+4. `docs/guide/laborlawhelp-frontend-integration-playbook.md`
+5. `docs/project/test-plan.md`
 
 ### Backend
 1. `docs/api/api-contract.md`
