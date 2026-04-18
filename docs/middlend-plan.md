@@ -372,3 +372,25 @@ APP_ENABLE_LOCAL_RULE_FALLBACK=false
 | 可直接开发 | API 契约顺序、错误码、生命周期与伪代码均可直接落地。 |
 
 此文档作为后端、中间件、前端、算法团队的统一实现依据。
+
+---
+
+#### 10. 实施文档导航（已落地）
+
+为确保按 M1/M2/M3 可执行推进，配套文档已拆分如下：
+
+- API 契约：`docs/api/api-contract.md`
+- 错误码手册：`docs/api/error-codes.md`
+- 前端接入指南：`docs/guide/frontend-integration.md`
+- 后端实现蓝图：`docs/guide/backend-implementation.md`
+- 数据库与迁移：`docs/database/schema-and-migration.md`
+- Redis 策略：`docs/database/redis-strategy.md`
+- 环境与运行手册：`docs/ops/environment-and-runbook.md`
+- 可观测性与告警：`docs/ops/observability.md`
+- 发布与回滚：`docs/ops/deploy-and-rollback.md`
+- 里程碑计划：`docs/project/milestones.md`
+- 测试计划（含性能门槛）：`docs/project/test-plan.md`
+- 预发验收清单：`docs/project/acceptance-checklist.md`
+- 游客迁移模板：`docs/project/anonymous-to-user-migration-template.md`
+- 统一术语附录：`docs/project/glossary.md`
+- 文档总览：`docs/project/document-index.md`
