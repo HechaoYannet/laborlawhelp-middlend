@@ -1,11 +1,13 @@
 from fastapi import FastAPI
 
-from app.api.v1.routes import cases, chat, sessions
+from app.api.v1.routes import auth, cases, chat, sessions
+from app.core.config import settings
 from app.core.errors import app_error_handler
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="LaborLawHelp Middlend", version="0.1.0")
+    app = FastAPI(title=settings.app_name, version=settings.app_version)
+    app.include_router(auth.router, prefix="/api/v1")
     app.include_router(cases.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
     app.include_router(chat.router, prefix="/api/v1")

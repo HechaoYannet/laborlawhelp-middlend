@@ -10,7 +10,7 @@ router = APIRouter(tags=["cases"])
 
 @router.post("/cases", response_model=CaseResponse, status_code=201)
 async def create_case_endpoint(payload: CreateCaseRequest, owner: Owner = Depends(resolve_owner)):
-    record = create_case(owner, payload.title, payload.region_code)
+    record = await create_case(owner, payload.title, payload.region_code)
     return CaseResponse(
         id=record.id,
         owner_type=record.owner_type,
@@ -23,7 +23,7 @@ async def create_case_endpoint(payload: CreateCaseRequest, owner: Owner = Depend
 
 @router.get("/cases", response_model=list[CaseResponse])
 async def list_cases_endpoint(owner: Owner = Depends(resolve_owner)):
-    records = list_cases(owner)
+    records = await list_cases(owner)
     return [
         CaseResponse(
             id=r.id,
@@ -39,7 +39,7 @@ async def list_cases_endpoint(owner: Owner = Depends(resolve_owner)):
 
 @router.get("/cases/{case_id}", response_model=CaseResponse)
 async def get_case_endpoint(case_id: str, owner: Owner = Depends(resolve_owner)):
-    record = get_case(owner, case_id)
+    record = await get_case(owner, case_id)
     return CaseResponse(
         id=record.id,
         owner_type=record.owner_type,
@@ -52,7 +52,7 @@ async def get_case_endpoint(case_id: str, owner: Owner = Depends(resolve_owner))
 
 @router.post("/cases/{case_id}/sessions", response_model=CreateSessionResponse, status_code=201)
 async def create_session_endpoint(case_id: str, owner: Owner = Depends(resolve_owner)):
-    session = create_session(owner, case_id)
+    session = await create_session(owner, case_id)
     return CreateSessionResponse(
         id=session.id,
         case_id=session.case_id,
@@ -63,7 +63,7 @@ async def create_session_endpoint(case_id: str, owner: Owner = Depends(resolve_o
 
 @router.get("/cases/{case_id}/sessions", response_model=list[CreateSessionResponse])
 async def list_sessions_endpoint(case_id: str, owner: Owner = Depends(resolve_owner)):
-    records = list_sessions(owner, case_id)
+    records = await list_sessions(owner, case_id)
     return [
         CreateSessionResponse(
             id=s.id,

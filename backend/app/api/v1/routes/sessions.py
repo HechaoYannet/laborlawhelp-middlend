@@ -11,13 +11,13 @@ router = APIRouter(tags=["sessions"])
 
 @router.get("/sessions/{session_id}/messages", response_model=list[MessageResponse])
 async def list_messages_endpoint(session_id: str, owner: Owner = Depends(resolve_owner)):
-    records = list_messages(owner, session_id)
+    records = await list_messages(owner, session_id)
     return [MessageResponse(id=m.id, role=m.role, content=m.content, created_at=m.created_at) for m in records]
 
 
 @router.patch("/sessions/{session_id}/end", response_model=EndSessionResponse)
 async def end_session_endpoint(session_id: str, owner: Owner = Depends(resolve_owner)):
-    session = end_session(owner, session_id)
+    session = await end_session(owner, session_id)
     return EndSessionResponse(
         id=session.id,
         status=session.status,
