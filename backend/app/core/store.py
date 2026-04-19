@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 import asyncio
+import json
+from uuid import UUID
 from uuid import uuid4
 
 from redis.asyncio import Redis
@@ -43,6 +45,19 @@ class MessageRecord:
     session_id: str
     role: str
     content: str
+    metadata: dict | None = None
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+@dataclass
+class AuditLogRecord:
+    trace_id: str
+    owner_type: str
+    owner_id: str
+    session_id: str
+    event_type: str
+    request_payload: dict
+    response_summary: str
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -74,7 +89,30 @@ class BaseStore:
     async def end_session(self, session_id: str) -> SessionRecord | None:
         raise NotImplementedError
 
-    async def save_message(self, session_id: str, role: str, content: str, message_id: str | None = None) -> MessageRecord:
+    async def save_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        message_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> MessageRecord:
+        raise NotImplementedError
+
+    async def save_audit_log(
+        self,
+        *,
+        trace_id: str,
+        owner_type: str,
+        owner_id: str,
+        session_id: str,
+        event_type: str,
+        request_payload: dict,
+        response_summary: str,
+    ) -> AuditLogRecord:
+        raise NotImplementedError
+
+    async def list_audit_logs(self, session_id: str) -> list[AuditLogRecord]:
         raise NotImplementedError
 
     async def list_messages(self, session_id: str) -> list[MessageRecord]:
@@ -96,6 +134,7 @@ class InMemoryStore(BaseStore):
         self.cases: dict[str, CaseRecord] = {}
         self.sessions: dict[str, SessionRecord] = {}
         self.messages: list[MessageRecord] = []
+        self.audit_logs: list[AuditLogRecord] = []
         self.session_locks: dict[str, asyncio.Lock] = {}
         self.stream_seq: dict[str, int] = {}
 
@@ -121,7 +160,14 @@ class InMemoryStore(BaseStore):
 
     async def create_session(self, case_id: str, owner_type: str, owner_id: str) -> SessionRecord:
         session_id = self.new_id()
-        session = SessionRecord(id=session_id, case_id=case_id, owner_type=owner_type, owner_id=owner_id)
+        openharness_session_id = self.new_id()
+        session = SessionRecord(
+            id=session_id,
+            case_id=case_id,
+            owner_type=owner_type,
+            owner_id=owner_id,
+            openharness_session_id=openharness_session_id,
+        )
         self.sessions[session_id] = session
         return session
 
@@ -143,13 +189,52 @@ class InMemoryStore(BaseStore):
         session.last_active_at = datetime.now(timezone.utc).isoformat()
         return session
 
-    async def save_message(self, session_id: str, role: str, content: str, message_id: str | None = None) -> MessageRecord:
-        msg = MessageRecord(id=message_id or self.new_id(), session_id=session_id, role=role, content=content)
+    async def save_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        message_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> MessageRecord:
+        msg = MessageRecord(
+            id=message_id or self.new_id(),
+            session_id=session_id,
+            role=role,
+            content=content,
+            metadata=metadata,
+        )
         self.messages.append(msg)
         return msg
 
     async def list_messages(self, session_id: str) -> list[MessageRecord]:
         return [m for m in self.messages if m.session_id == session_id]
+
+    async def save_audit_log(
+        self,
+        *,
+        trace_id: str,
+        owner_type: str,
+        owner_id: str,
+        session_id: str,
+        event_type: str,
+        request_payload: dict,
+        response_summary: str,
+    ) -> AuditLogRecord:
+        record = AuditLogRecord(
+            trace_id=trace_id,
+            owner_type=owner_type,
+            owner_id=owner_id,
+            session_id=session_id,
+            event_type=event_type,
+            request_payload=request_payload,
+            response_summary=response_summary,
+        )
+        self.audit_logs.append(record)
+        return record
+
+    async def list_audit_logs(self, session_id: str) -> list[AuditLogRecord]:
+        return [log for log in self.audit_logs if log.session_id == session_id]
 
     async def update_session_activity(self, session_id: str, message_increment: int) -> None:
         session = self.sessions.get(session_id)
@@ -284,6 +369,7 @@ class PostgresRedisStore(BaseStore):
 
     async def create_session(self, case_id: str, owner_type: str, owner_id: str) -> SessionRecord:
         session_id = str(uuid4())
+        openharness_session_id = str(uuid4())
         user_id = owner_id if owner_type == "user" else None
         anonymous_id = owner_id if owner_type == "anonymous" else None
         engine = await self._engine_ref()
@@ -291,13 +377,45 @@ class PostgresRedisStore(BaseStore):
             await conn.execute(
                 text(
                     """
-                    INSERT INTO sessions (id, case_id, user_id, anonymous_id, status, message_count, created_at, last_active_at)
-                    VALUES (:id, :case_id, :user_id, :anonymous_id, 'active', 0, NOW(), NOW())
+                    INSERT INTO sessions (
+                        id,
+                        case_id,
+                        user_id,
+                        anonymous_id,
+                        openharness_session_id,
+                        status,
+                        message_count,
+                        created_at,
+                        last_active_at
+                    )
+                    VALUES (
+                        :id,
+                        :case_id,
+                        :user_id,
+                        :anonymous_id,
+                        :openharness_session_id,
+                        'active',
+                        0,
+                        NOW(),
+                        NOW()
+                    )
                     """
                 ),
-                {"id": session_id, "case_id": case_id, "user_id": user_id, "anonymous_id": anonymous_id},
+                {
+                    "id": session_id,
+                    "case_id": case_id,
+                    "user_id": user_id,
+                    "anonymous_id": anonymous_id,
+                    "openharness_session_id": openharness_session_id,
+                },
             )
-        return SessionRecord(id=session_id, case_id=case_id, owner_type=owner_type, owner_id=owner_id)
+        return SessionRecord(
+            id=session_id,
+            case_id=case_id,
+            owner_type=owner_type,
+            owner_id=owner_id,
+            openharness_session_id=openharness_session_id,
+        )
 
     async def list_sessions(self, case_id: str, owner_type: str, owner_id: str) -> list[SessionRecord]:
         engine = await self._engine_ref()
@@ -378,20 +496,33 @@ class PostgresRedisStore(BaseStore):
             )
         return await self.get_session(session_id)
 
-    async def save_message(self, session_id: str, role: str, content: str, message_id: str | None = None) -> MessageRecord:
+    async def save_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        message_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> MessageRecord:
         mid = message_id or str(uuid4())
         engine = await self._engine_ref()
         async with engine.begin() as conn:
             await conn.execute(
                 text(
                     """
-                    INSERT INTO messages (id, session_id, role, content, created_at)
-                    VALUES (:id, :session_id, :role, :content, NOW())
+                    INSERT INTO messages (id, session_id, role, content, metadata, created_at)
+                    VALUES (:id, :session_id, :role, :content, CAST(:metadata AS JSONB), NOW())
                     """
                 ),
-                {"id": mid, "session_id": session_id, "role": role, "content": content},
+                {
+                    "id": mid,
+                    "session_id": session_id,
+                    "role": role,
+                    "content": content,
+                    "metadata": None if metadata is None else json.dumps(metadata, ensure_ascii=False),
+                },
             )
-        return MessageRecord(id=mid, session_id=session_id, role=role, content=content)
+        return MessageRecord(id=mid, session_id=session_id, role=role, content=content, metadata=metadata)
 
     async def list_messages(self, session_id: str) -> list[MessageRecord]:
         engine = await self._engine_ref()
@@ -399,7 +530,7 @@ class PostgresRedisStore(BaseStore):
             result = await conn.execute(
                 text(
                     """
-                    SELECT id, session_id, role, content, created_at
+                    SELECT id, session_id, role, content, metadata, created_at
                     FROM messages
                     WHERE session_id = :session_id
                     ORDER BY created_at ASC
@@ -414,10 +545,118 @@ class PostgresRedisStore(BaseStore):
                 session_id=str(row["session_id"]),
                 role=str(row["role"]),
                 content=str(row["content"]),
+                metadata=row["metadata"],
                 created_at=_to_iso(row["created_at"]),
             )
             for row in rows
         ]
+
+    async def save_audit_log(
+        self,
+        *,
+        trace_id: str,
+        owner_type: str,
+        owner_id: str,
+        session_id: str,
+        event_type: str,
+        request_payload: dict,
+        response_summary: str,
+    ) -> AuditLogRecord:
+        engine = await self._engine_ref()
+        user_id: str | None = None
+        anonymous_id: str | None = None
+        if owner_type == "user":
+            try:
+                user_id = str(UUID(owner_id))
+            except ValueError:
+                user_id = None
+        else:
+            anonymous_id = owner_id
+        if owner_type == "user" and user_id is None:
+            anonymous_id = owner_id
+
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO audit_logs (
+                        trace_id,
+                        user_id,
+                        anonymous_id,
+                        session_id,
+                        event_type,
+                        request_payload,
+                        response_summary,
+                        created_at
+                    )
+                    VALUES (
+                        CAST(:trace_id AS UUID),
+                        CAST(:user_id AS UUID),
+                        :anonymous_id,
+                        CAST(:session_id AS UUID),
+                        :event_type,
+                        CAST(:request_payload AS JSONB),
+                        :response_summary,
+                        NOW()
+                    )
+                    """
+                ),
+                {
+                    "trace_id": trace_id,
+                    "user_id": user_id,
+                    "anonymous_id": anonymous_id,
+                    "session_id": session_id,
+                    "event_type": event_type,
+                    "request_payload": json.dumps(request_payload, ensure_ascii=False),
+                    "response_summary": response_summary,
+                },
+            )
+        return AuditLogRecord(
+            trace_id=trace_id,
+            owner_type=owner_type,
+            owner_id=owner_id,
+            session_id=session_id,
+            event_type=event_type,
+            request_payload=request_payload,
+            response_summary=response_summary,
+        )
+
+    async def list_audit_logs(self, session_id: str) -> list[AuditLogRecord]:
+        engine = await self._engine_ref()
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text(
+                    """
+                    SELECT trace_id, user_id, anonymous_id, session_id, event_type, request_payload, response_summary, created_at
+                    FROM audit_logs
+                    WHERE session_id = CAST(:session_id AS UUID)
+                    ORDER BY created_at ASC
+                    """
+                ),
+                {"session_id": session_id},
+            )
+            rows = result.mappings().all()
+
+        records = []
+        for row in rows:
+            owner_type = "user" if row["user_id"] else "anonymous"
+            owner_id = str(row["user_id"] or row["anonymous_id"] or "")
+            request_payload = row["request_payload"]
+            if isinstance(request_payload, str):
+                request_payload = json.loads(request_payload)
+            records.append(
+                AuditLogRecord(
+                    trace_id=str(row["trace_id"]),
+                    owner_type=owner_type,
+                    owner_id=owner_id,
+                    session_id=str(row["session_id"]),
+                    event_type=str(row["event_type"]),
+                    request_payload=request_payload if isinstance(request_payload, dict) else {},
+                    response_summary=str(row["response_summary"] or ""),
+                    created_at=_to_iso(row["created_at"]),
+                )
+            )
+        return records
 
     async def update_session_activity(self, session_id: str, message_increment: int) -> None:
         engine = await self._engine_ref()

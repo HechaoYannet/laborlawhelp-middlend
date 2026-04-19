@@ -1,5 +1,9 @@
 # Documentation Index and Role Path
 
+## 0. Canonical Source
+- OpenHarness 模块开发文档以 `docs/guide/openharness-module-development-and-integration.md` 为唯一维护源。
+- 若仓库外存在同名副本，仅保留跳转或定期同步，避免双份内容漂移。
+
 ## 1. Core Design Source
 - `docs/middlend-plan.md`
 

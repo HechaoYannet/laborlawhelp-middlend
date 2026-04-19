@@ -45,5 +45,9 @@
 
 - 后端说明与启动：[`backend/README.md`](backend/README.md)
 - 后端测试：[`backend/tests/test_smoke.py`](backend/tests/test_smoke.py)
+- Postgres/Redis 实链测试脚本：[`backend/scripts/run_postgres_integration.sh`](backend/scripts/run_postgres_integration.sh)
 - 前端流式 SDK：[`frontend-sdk/stream-chat.ts`](frontend-sdk/stream-chat.ts)
 - 烟雾脚本：[`scripts/smoke-chat.ps1`](scripts/smoke-chat.ps1)
+
+文档源约定：
+- OpenHarness 模块开发文档以 `docs/guide/openharness-module-development-and-integration.md` 为单一维护源。

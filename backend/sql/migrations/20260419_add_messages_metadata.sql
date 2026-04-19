@@ -1,0 +1,2 @@
+ALTER TABLE IF EXISTS messages
+    ADD COLUMN IF NOT EXISTS metadata JSONB;

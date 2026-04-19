@@ -11,11 +11,10 @@ from app.services.session_service import get_session
 router = APIRouter(tags=["chat"])
 
 
-@router.post("/sessions/{session_id}/chat")
-async def chat_stream_endpoint(
+async def _chat_stream(
     session_id: str,
     payload: ChatRequest,
-    owner: Owner = Depends(resolve_owner),
+    owner: Owner,
 ):
     session = await get_session(owner, session_id)
     if session.status != "active":
@@ -24,3 +23,21 @@ async def chat_stream_endpoint(
     await check_rate_limit(owner.owner_id)
     event_generator = stream_chat(owner, session_id, payload)
     return StreamingResponse(event_generator, media_type="text/event-stream")
+
+
+@router.post("/sessions/{session_id}/chat")
+async def chat_stream_compat_endpoint(
+    session_id: str,
+    payload: ChatRequest,
+    owner: Owner = Depends(resolve_owner),
+):
+    return await _chat_stream(session_id, payload, owner)
+
+
+@router.post("/sessions/{session_id}/chat/stream")
+async def chat_stream_endpoint(
+    session_id: str,
+    payload: ChatRequest,
+    owner: Owner = Depends(resolve_owner),
+):
+    return await _chat_stream(session_id, payload, owner)

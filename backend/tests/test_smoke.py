@@ -1,10 +1,14 @@
 from collections.abc import Generator
+import json
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.adapters.openharness_client import OHChunk
 from app.core import rate_limit
 from app.core.config import settings
+from app.core.errors import AppError
 from app.core.store import InMemoryStore, store
 from app.main import app
 
@@ -25,6 +29,7 @@ def reset_runtime_state() -> Generator[None, None, None]:
         store.cases.clear()
         store.sessions.clear()
         store.messages.clear()
+        store.audit_logs.clear()
         store.session_locks.clear()
         store.stream_seq.clear()
 
@@ -46,7 +51,27 @@ def _create_case_and_session(client: TestClient, token: str) -> tuple[str, str]:
 
     session_resp = client.post(f"/api/v1/cases/{case_id}/sessions", headers=headers)
     assert session_resp.status_code == 201
-    return case_id, session_resp.json()["id"]
+    session_data = session_resp.json()
+    assert session_data["openharness_session_id"]
+    UUID(session_data["openharness_session_id"])
+    return case_id, session_data["id"]
+
+
+def _parse_sse_events(payload: str) -> list[tuple[str, dict]]:
+    events: list[tuple[str, dict]] = []
+    for frame in payload.split("\n\n"):
+        frame = frame.strip()
+        if not frame:
+            continue
+        lines = frame.splitlines()
+        event_line = next((line for line in lines if line.startswith("event:")), None)
+        data_line = next((line for line in lines if line.startswith("data:")), None)
+        if not event_line or not data_line:
+            continue
+        event = event_line.removeprefix("event:").strip()
+        data = json.loads(data_line.removeprefix("data:").strip())
+        events.append((event, data))
+    return events
 
 
 def test_main_flow_stream_events() -> None:
@@ -69,6 +94,45 @@ def test_main_flow_stream_events() -> None:
     assert "event: tool_result" in payload
     assert "event: final" in payload
     assert "event: message_end" in payload
+
+    events = _parse_sse_events(payload)
+    final = next(data for event, data in events if event == "final")
+    assert final["trace_id"]
+    assert final["finish_reason"]
+
+
+def test_chat_stream_alias_has_same_event_contract() -> None:
+    client = TestClient(app)
+    headers = {"X-Anonymous-Token": "anon-stream"}
+    _, session_id = _create_case_and_session(client, "anon-stream")
+
+    with client.stream(
+        "POST",
+        f"/api/v1/sessions/{session_id}/chat",
+        json={"message": "被辞退了", "client_seq": 1, "attachments": []},
+        headers=headers,
+    ) as response_compat:
+        assert response_compat.status_code == 200
+        compat_payload = "".join(response_compat.iter_text())
+
+    with client.stream(
+        "POST",
+        f"/api/v1/sessions/{session_id}/chat/stream",
+        json={"message": "被辞退了", "client_seq": 2, "attachments": [], "locale": "zh-CN"},
+        headers=headers,
+    ) as response_stream:
+        assert response_stream.status_code == 200
+        stream_payload = "".join(response_stream.iter_text())
+
+    compat_events = [event for event, _ in _parse_sse_events(compat_payload)]
+    stream_events = [event for event, _ in _parse_sse_events(stream_payload)]
+
+    assert compat_events[0] == "message_start"
+    assert stream_events[0] == "message_start"
+    assert compat_events[-1] == "message_end"
+    assert stream_events[-1] == "message_end"
+    assert "final" in compat_events
+    assert "final" in stream_events
 
 
 def test_cross_owner_forbidden() -> None:
@@ -119,6 +183,53 @@ def test_messages_endpoint_contains_user_and_assistant() -> None:
     roles = [m["role"] for m in data]
     assert "user" in roles
     assert "assistant" in roles
+
+
+def test_stream_error_event_shape_and_failed_assistant_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(app)
+    headers = {"X-Anonymous-Token": "anon-error"}
+    _, session_id = _create_case_and_session(client, "anon-error")
+
+    async def broken_stream_run(**_: dict):
+        yield OHChunk(type="text", content="开头文本")
+        raise AppError(504, "OH_UPSTREAM_TIMEOUT", "OpenHarness 请求超时", retryable=True)
+
+    monkeypatch.setattr("app.services.chat_service.openharness_client.stream_run", broken_stream_run)
+
+    with client.stream(
+        "POST",
+        f"/api/v1/sessions/{session_id}/chat/stream",
+        json={"message": "测试异常", "client_seq": 1, "attachments": []},
+        headers=headers,
+    ) as response:
+        assert response.status_code == 200
+        payload = "".join(response.iter_text())
+
+    events = _parse_sse_events(payload)
+    event_names = [event for event, _ in events]
+    assert event_names[0] == "message_start"
+    assert event_names[-2] == "error"
+    assert event_names[-1] == "message_end"
+
+    error = next(data for event, data in events if event == "error")
+    assert sorted(error.keys()) == ["code", "message", "retryable", "trace_id"]
+    assert error["code"] == "OH_UPSTREAM_TIMEOUT"
+    assert error["retryable"] is True
+
+    assert isinstance(store, InMemoryStore)
+    assistant_messages = [m for m in store.messages if m.session_id == session_id and m.role == "assistant"]
+    assert assistant_messages
+    latest = assistant_messages[-1]
+    assert latest.content == ""
+    assert latest.metadata is not None
+    assert latest.metadata["status"] == "failed"
+    assert latest.metadata["error_code"] == "OH_UPSTREAM_TIMEOUT"
+
+    assert store.audit_logs
+    latest_audit = store.audit_logs[-1]
+    assert latest_audit.trace_id == error["trace_id"]
+    assert latest_audit.event_type == "turn_failed"
+    assert latest_audit.request_payload["error_code"] == "OH_UPSTREAM_TIMEOUT"
 
 
 def test_rate_limit_enforced_on_chat() -> None:

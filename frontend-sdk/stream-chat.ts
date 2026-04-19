@@ -9,6 +9,9 @@ export type ChatPayload = {
   message: string;
   client_seq: number;
   attachments?: ChatAttachment[];
+  locale?: string;
+  policy_version?: string;
+  client_capabilities?: string[];
 };
 
 export async function streamChat(
@@ -18,7 +21,7 @@ export async function streamChat(
   ownerToken: string,
   onEvent: (event: string, data: any) => void,
 ): Promise<void> {
-  const response = await fetch(`${baseUrl}/api/v1/sessions/${sessionId}/chat`, {
+  const response = await fetch(`${baseUrl}/api/v1/sessions/${sessionId}/chat/stream`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

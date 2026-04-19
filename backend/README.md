@@ -38,6 +38,11 @@ storage_backend=postgres
 database_url=postgresql://postgres:postgres@127.0.0.1:5432/laborlawhelp
 redis_url=redis://127.0.0.1:6379/0
 oh_use_mock=true
+oh_connect_timeout_sec=5
+oh_read_timeout_sec=60
+oh_first_chunk_timeout_sec=15
+oh_retry_max_attempts=3
+oh_retry_backoff_seconds=1,2,4
 auth_mode=anonymous
 jwt_secret_key=change-me
 ```
@@ -46,6 +51,12 @@ jwt_secret_key=change-me
 
 ```powershell
 psql -d laborlawhelp -f .\sql\init_schema.sql
+```
+
+如果是已有库升级到本版本，先执行：
+
+```powershell
+psql -d laborlawhelp -f .\sql\migrations\20260419_add_messages_metadata.sql
 ```
 
 ## 4. pytest 测试
@@ -61,6 +72,17 @@ python -m pytest -q
 - 消息列表回读
 - 限流触发
 - JWT 模式登录与刷新
+
+Postgres/Redis 实链集成测试（需本机可用 Docker）：
+
+```bash
+cd backend
+./scripts/run_postgres_integration.sh
+```
+
+可选参数：
+- `KEEP_CONTAINERS=1`：测试完成后不自动删除容器，便于手工排障。
+- `PG_PORT`、`REDIS_PORT`：自定义本地端口，避免冲突。
 
 ## 5. JWT 二期开关
 
@@ -94,6 +116,7 @@ cd scripts
 - GET `/api/v1/sessions/{session_id}/messages`
 - PATCH `/api/v1/sessions/{session_id}/end`
 - POST `/api/v1/sessions/{session_id}/chat`
+- POST `/api/v1/sessions/{session_id}/chat/stream`
 - POST `/api/v1/auth/sms/send`
 - POST `/api/v1/auth/sms/login`
 - POST `/api/v1/auth/refresh`

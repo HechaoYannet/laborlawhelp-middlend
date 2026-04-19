@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LaborLawHelp Middlend Playground</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">LaborLawHelp Middlend Playground</p>
+          <h1>全链路输入检查台</h1>
+          <p class="hero-text">
+            直接在 midend 里检查从前端输入、会话编排、SSE 流、OpenHarness
+            调用到最终落库的整条链路。
+          </p>
+          <div class="chain-strip">
+            <span>Frontend</span>
+            <span>Middlend</span>
+            <span>OpenHarness</span>
+            <span>Model + MCP</span>
+          </div>
+        </div>
+        <aside class="runtime-card">
+          <div class="panel-title-row">
+            <p class="panel-kicker">Runtime</p>
+            <button id="refreshRuntimeBtn" class="ghost-button" type="button">刷新</button>
+          </div>
+          <dl id="runtimeMeta" class="runtime-meta"></dl>
+        </aside>
+      </header>
+
+      <main class="layout">
+        <section class="control-stack">
+          <article class="panel">
+            <div class="panel-title-row">
+              <div>
+                <p class="panel-kicker">Connection</p>
+                <h2>请求上下文</h2>
+              </div>
+              <button id="saveDraftBtn" class="ghost-button" type="button">保存草稿</button>
+            </div>
+
+            <div class="form-grid two-up">
+              <label>
+                <span>API Base URL</span>
+                <input id="baseUrl" type="text" placeholder="http://127.0.0.1:8000" />
+              </label>
+              <label>
+                <span>X-Trace-Id</span>
+                <input id="traceId" type="text" placeholder="可选，自定义链路追踪 ID" />
+              </label>
+              <label>
+                <span>认证方式</span>
+                <select id="ownerMode">
+                  <option value="anonymous">匿名 token</option>
+                  <option value="jwt">Bearer token</option>
+                </select>
+              </label>
+              <label>
+                <span>匿名 token</span>
+                <input id="anonymousToken" type="text" placeholder="anon-labor-debug" />
+              </label>
+            </div>
+
+            <label class="full-width">
+              <span>Bearer token</span>
+              <textarea
+                id="bearerToken"
+                rows="3"
+                placeholder="当 auth_mode=jwt 时填入 access token"
+              ></textarea>
+            </label>
+
+            <div id="ownerHint" class="inline-note"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-title-row">
+              <div>
+                <p class="panel-kicker">Case + Session</p>
+                <h2>会话编排</h2>
+              </div>
+            </div>
+
+            <div class="form-grid two-up">
+              <label>
+                <span>案件标题</span>
+                <input id="caseTitle" type="text" placeholder="试用期辞退联调样例" />
+              </label>
+              <label>
+                <span>地域编码</span>
+                <input id="regionCode" type="text" placeholder="xian" />
+              </label>
+              <label>
+                <span>当前 case_id</span>
+                <input id="caseId" type="text" placeholder="创建后自动回填，也可手填" />
+              </label>
+              <label>
+                <span>当前 session_id</span>
+                <input id="sessionId" type="text" placeholder="创建后自动回填，也可手填" />
+              </label>
+            </div>
+
+            <div class="button-row">
+              <button id="createCaseBtn" type="button">创建 Case</button>
+              <button id="listCasesBtn" class="ghost-button" type="button">列出 Cases</button>
+              <button id="createSessionBtn" type="button">创建 Session</button>
+              <button id="listSessionsBtn" class="ghost-button" type="button">列出 Sessions</button>
+              <button id="loadMessagesBtn" class="ghost-button" type="button">读取 Messages</button>
+              <button id="endSessionBtn" class="ghost-button danger-button" type="button">结束 Session</button>
+            </div>
+
+            <div id="resourceList" class="resource-list empty-state">还没有加载 case / session 列表。</div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-title-row">
+              <div>
+                <p class="panel-kicker">Chat Payload</p>
+                <h2>输入参数</h2>
+              </div>
+              <div class="pill-group">
+                <span class="pill">SSE</span>
+                <span class="pill">ReadableStream</span>
+                <span class="pill">Message Audit</span>
+              </div>
+            </div>
+
+            <label class="full-width">
+              <span>message</span>
+              <textarea
+                id="messageInput"
+                rows="6"
+                placeholder="例如：我在试用期被口头辞退，公司没有给书面通知，也没有结清工资，我该怎么取证？"
+              ></textarea>
+            </label>
+
+            <div class="form-grid three-up">
+              <label>
+                <span>client_seq</span>
+                <input id="clientSeq" type="number" min="1" step="1" value="1" />
+              </label>
+              <label>
+                <span>locale</span>
+                <input id="locale" type="text" placeholder="zh-CN" />
+              </label>
+              <label>
+                <span>policy_version</span>
+                <input id="policyVersion" type="text" placeholder="可选，例如 v2.2" />
+              </label>
+            </div>
+
+            <div class="form-grid two-up">
+              <label>
+                <span>client_capabilities</span>
+                <input
+                  id="capabilities"
+                  type="text"
+                  placeholder="用逗号分隔，例如 citations,tool-status,reasoning-summary"
+                />
+              </label>
+              <label>
+                <span>附件 JSON</span>
+                <textarea
+                  id="attachments"
+                  rows="4"
+                  placeholder='例如 [{"id":"att-1","name":"劳动合同.pdf","url":"https://example.com/contract.pdf","mime_type":"application/pdf"}]'
+                ></textarea>
+              </label>
+            </div>
+
+            <div class="button-row">
+              <button id="sendChatBtn" type="button">发送 SSE Chat</button>
+              <button id="clearEventsBtn" class="ghost-button" type="button">清空事件</button>
+              <button id="resetStateBtn" class="ghost-button" type="button">重置当前状态</button>
+            </div>
+          </article>
+        </section>
+
+        <section class="observability-stack">
+          <article class="panel">
+            <div class="panel-title-row">
+              <div>
+                <p class="panel-kicker">Assistant Stream</p>
+                <h2>实时输出</h2>
+              </div>
+              <div id="streamStatus" class="status-chip idle">Idle</div>
+            </div>
+
+            <div id="requestPreview" class="request-preview empty-state">发送前请求体会显示在这里。</div>
+            <div id="assistantOutput" class="assistant-output empty-state">等待 SSE 响应...</div>
+          </article>
+
+          <article class="panel final-panel">
+            <div class="panel-title-row">
+              <div>
+                <p class="panel-kicker">Final Payload</p>
+                <h2>收束结果</h2>
+              </div>
+            </div>
+            <div id="finalSummary" class="summary-card empty-state">还没有收到 final 事件。</div>
+            <div id="finalRefs" class="reference-list empty-state">引用信息会显示在这里。</div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-title-row">
+              <div>
+                <p class="panel-kicker">Event Timeline</p>
+                <h2>SSE 事件流</h2>
+              </div>
+              <div id="eventStats" class="inline-note">0 events</div>
+            </div>
+            <div id="eventLog" class="event-log empty-state">等待事件...</div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-title-row">
+              <div>
+                <p class="panel-kicker">Message Store</p>
+                <h2>会话消息回读</h2>
+              </div>
+            </div>
+            <div id="messageHistory" class="message-history empty-state">调用 messages 接口后显示。</div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

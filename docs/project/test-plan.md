@@ -23,7 +23,7 @@
 | S-01 | 正常流 | 按顺序到达并以 `message_end` 结束 |
 | S-02 | 分片传输 | 客户端可正确重组帧 |
 | S-03 | `seq` 顺序校验 | 不出现倒序渲染 |
-| S-04 | 流内错误 | 收到 `error` 事件且携带 `retryable` |
+| S-04 | 流内错误 | 收到 `error -> message_end` 收尾且携带 `retryable` |
 
 ## 4. 并发与限流
 | ID | 场景 | 预期 |
@@ -50,12 +50,22 @@
 | 自动化用例 | 文件 |
 |---|---|
 | 主链路、权限、会话、限流、JWT | `backend/tests/test_smoke.py` |
+| OpenHarness 适配器单元 | `backend/tests/test_openharness_client.py` |
+| 审计服务单元 | `backend/tests/test_audit_service.py` |
+| Postgres/Redis 实链集成 | `backend/tests/integration/test_postgres_streaming.py` |
 
 执行命令：
 
 ```powershell
 cd backend
 python -m pytest -q
+```
+
+Postgres/Redis 实链测试命令：
+
+```bash
+cd backend
+./scripts/run_postgres_integration.sh
 ```
 
 ## 8. 准入与退出标准
