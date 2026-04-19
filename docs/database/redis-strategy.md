@@ -1,37 +1,26 @@
-# Redis Key Strategy and Recovery
+# Redis Key Strategy and Recovery（当前实现）
 
 ## 1. Keyspace
 | Key | Type | TTL | Purpose |
 |---|---|---|---|
-| `owner:{owner_id}:sessions` | Set | no | active sessions |
-| `session:{session_id}:lock` | String | 30s | per-session lock |
-| `session:{session_id}:stream:seq` | String | session lifecycle | stream sequence |
-| `rate:owner:{owner_id}:minute` | String | 60s | per-minute limit |
-| `jwt:refresh:{user_id}:{jti}` | String | 7d | refresh deny list |
+| `session:{session_id}:lock` | Lock | `session_lock_timeout_seconds`（默认 30s） | 会话级并发锁 |
+| `session:{session_id}:stream:seq` | String(counter) | 无显式 TTL | `content_delta` 序号 |
+| `rate:owner:{owner_id}:{YYYYMMDDHHMM}` | String(counter) | 60s | 每 owner 每分钟限流 |
 
-## 2. Locking Policy
-- Acquire lock before chat execution.
-- Lock value should include `trace_id` for debugging.
-- On stream exit, release lock in `finally` block.
+## 2. Lock Policy
+- 聊天执行前先抢锁。
+- 抢锁失败返回 `409 SESSION_LOCKED`。
+- 依赖 TTL 自动兜底清理异常锁。
 
 ## 3. Rate Limit Policy
-- Phase 1 baseline: 20 requests/minute per owner.
-- Exceed limit => `429 RATE_LIMITED`.
-- Track burst pattern for abuse analysis.
+- 默认阈值：`rate_limit_per_minute=20`。
+- 超限返回 `429 RATE_LIMITED`。
+- `storage_backend=postgres` 时优先使用 Redis 计数。
 
-## 4. Stream Seq Policy
-- Initialize seq on new session.
-- Increment per `content_delta`.
-- Include last seq in audit for stream failures.
+## 4. Redis 异常降级
+- 限流：Redis 不可用时回退内存限流（服务级）。
+- 会话锁与 seq：在 `postgres` 模式下依赖 Redis，异常会影响该能力可用性。
 
-## 5. Failure Recovery
-| Failure | Recovery |
-|---|---|
-| Redis transient failure | degrade to safe reject (503) |
-| Lock key leaked | rely on TTL expiration |
-| Seq key missing | reinit and mark recovery in audit |
-| Rate key missing | recreate key and continue |
-
-## 6. Ops Notes
-- Enable Redis persistence mode according to environment policy.
-- Monitor key eviction; lock and seq keys must not be evicted under normal load.
+## 5. Ops Notes
+- 为 Redis 设置合理内存与淘汰策略，避免锁与 seq key 被异常淘汰。
+- 关注连接错误、超时和 `SESSION_LOCKED` 异常突增。

@@ -24,6 +24,7 @@
 - [前端集成指南](docs/guide/frontend-integration.md)
 - [前端集成 Playbook](docs/guide/laborlawhelp-frontend-integration-playbook.md)
 - [OpenHarness 模块开发与集成](docs/guide/openharness-module-development-and-integration.md)
+- [PKULaw + OpenHarness 协作](docs/guide/pkulaw-openharness-collaboration.md)
 
 ### 数据与存储
 - [数据库 Schema 与迁移](docs/database/schema-and-migration.md)

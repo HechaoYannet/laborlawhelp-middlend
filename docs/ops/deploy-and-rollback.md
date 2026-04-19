@@ -3,7 +3,7 @@
 ## 1. Release Strategy
 - Environment order: Dev -> Staging.
 - Use small-batch canary in staging where possible.
-- Keep `APP_ENABLE_LOCAL_RULE_FALLBACK=false` by default.
+- Keep `app_enable_local_rule_fallback=false` by default.
 
 ## 2. Pre-Deploy Checklist
 1. Migrations reviewed and approved.

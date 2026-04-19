@@ -16,6 +16,7 @@
 - `docs/guide/laborlawhelp-frontend-integration-playbook.md`
 - `docs/guide/backend-implementation.md`
 - `docs/guide/openharness-module-development-and-integration.md`
+- `docs/guide/pkulaw-openharness-collaboration.md`
 
 ## 4. Data Layer
 - `docs/database/schema-and-migration.md`
@@ -44,8 +45,9 @@
 ### Backend
 1. `docs/api/api-contract.md`
 2. `docs/guide/backend-implementation.md`
-3. `docs/database/schema-and-migration.md`
-4. `docs/database/redis-strategy.md`
+3. `docs/guide/openharness-module-development-and-integration.md`
+4. `docs/database/schema-and-migration.md`
+5. `docs/database/redis-strategy.md`
 
 ### QA
 1. `docs/api/api-contract.md`

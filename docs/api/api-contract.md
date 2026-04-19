@@ -1,10 +1,9 @@
-# API 契约 v1（Markdown 单一事实源）
+# API 契约 v1（与当前代码实现对齐）
 
 ## 1. 范围与版本
 - 统一前缀：`/api/v1`
-- 一期认证模式：`auth_mode=anonymous`
-- 二期认证模式：`auth_mode=jwt`
-- 本文档是 HTTP/SSE 协议唯一事实来源。
+- 认证模式：`auth_mode=anonymous` 或 `auth_mode=jwt`
+- 本文档是当前后端 HTTP/SSE 行为事实源。
 
 ## 2. 通用规则
 | 项目 | 规则 |
@@ -12,165 +11,90 @@
 | 请求体类型 | `application/json` |
 | 流式响应类型 | `text/event-stream` |
 | 时间格式 | ISO-8601（UTC） |
-| 主键类型 | 默认 UUID（特殊说明除外） |
-| 幂等建议 | `client_seq + session_id` 作为客户端请求序列键 |
-| 链路追踪 | 客户端可传 `X-Trace-Id`，服务端缺省自动生成 |
+| 链路追踪 | 服务器为每轮聊天生成 `trace_id`，并写入 SSE 事件 |
 
-## 3. 认证与归属
-| 模式 | 必需请求头 | 服务端行为 |
+## 3. 认证与 owner 归属
+| 模式 | 必需请求头 | 行为 |
 |---|---|---|
 | `anonymous` | `X-Anonymous-Token` | 绑定匿名 owner |
-| `jwt` | `Authorization: Bearer <access_token>` | 校验 JWT 并绑定用户 owner |
+| `jwt` | `Authorization: Bearer <access_token>` | 强制 JWT 校验并绑定用户 owner |
 
-说明：`/cases`、`/sessions` 全部端点均执行 owner 归属校验。
+说明：`/cases`、`/sessions`、`/chat` 相关端点均按 owner 做归属校验。
 
-## 4. 案件与会话接口
+## 4. 已实现端点
 
-### 4.1 `POST /cases`
-创建案件。
-
-请求体：
-
-| 字段 | 类型 | 必填 | 约束 | 说明 |
-|---|---|---|---|---|
-| title | string | 否 | max 200 | 默认 `未命名案件` |
-| region_code | string | 否 | max 20 | 默认 `xian` |
-
-响应 `201`：
-
-| 字段 | 类型 | 说明 |
+### 4.1 案件与会话
+| 端点 | 方法 | 说明 |
 |---|---|---|
-| id | uuid | case_id |
-| owner_type | string | `anonymous` / `user` |
-| created_at | string | ISO-8601 |
-| title | string | 案件标题 |
-| region_code | string | 地域编码 |
-| status | string | `active` / `archived` |
+| `/cases` | POST | 创建案件 |
+| `/cases` | GET | 查询当前 owner 案件列表 |
+| `/cases/{case_id}` | GET | 查询案件详情 |
+| `/cases/{case_id}/sessions` | POST | 在案件下创建会话 |
+| `/cases/{case_id}/sessions` | GET | 查询案件下会话列表 |
+| `/sessions/{session_id}/messages` | GET | 查询会话消息（时间升序，不分页） |
+| `/sessions/{session_id}/end` | PATCH | 主动结束会话 |
 
-### 4.2 `GET /cases`
-获取当前 owner 的案件列表。
-
-### 4.3 `GET /cases/{case_id}`
-获取案件详情。
-
-### 4.4 `POST /cases/{case_id}/sessions`
-在案件下创建会话。
-
-响应 `201`：
-
-| 字段 | 类型 | 说明 |
+### 4.2 聊天流
+| 端点 | 方法 | 说明 |
 |---|---|---|
-| id | uuid | session_id |
-| case_id | uuid | 所属案件 |
-| status | string | 默认 `active` |
-| openharness_session_id | string/null | OpenHarness 会话标识 |
+| `/sessions/{session_id}/chat` | POST | SSE 主端点 |
+| `/sessions/{session_id}/chat/stream` | POST | 与 `/chat` 等价的别名端点 |
 
-### 4.5 `GET /cases/{case_id}/sessions`
-获取案件下会话列表。
-
-### 4.6 `GET /sessions/{session_id}/messages`
-获取会话消息列表（按时间升序）。
-
-### 4.7 `PATCH /sessions/{session_id}/end`
-主动结束会话。
-
-响应 `200`：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | uuid | session id |
-| status | string | `ended` |
-| ended_at | string | ISO-8601 |
-
-## 5. 聊天流接口
-
-### 5.1 `POST /sessions/{session_id}/chat`
 请求体：
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| message | string | 是 | 用户输入 |
-| attachments | array | 否 | 附件数组 |
-| client_seq | int | 是 | 客户端会话内单调递增序号 |
+| `message` | string | 是 | 1~4000 字 |
+| `attachments` | array | 否 | 附件数组 |
+| `client_seq` | int | 是 | `>=0` |
+| `locale` | string | 否 | 语言偏好 |
+| `policy_version` | string | 否 | 规则版本偏好 |
+| `client_capabilities` | string[] | 否 | 客户端能力声明 |
 
-附件对象：
+附件对象：`id`、`name`、`url`、`mime_type` 均为必填字符串。
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| id | string | 是 | 附件 ID |
-| name | string | 是 | 文件名 |
-| url | string | 是 | HTTPS 地址 |
-| mime_type | string | 是 | 例如 `image/png` |
+### 4.3 认证
+| 端点 | 方法 | 说明 |
+|---|---|---|
+| `/auth/sms/send` | POST | 发送验证码（开发环境模拟） |
+| `/auth/sms/login` | POST | 登录并返回 access/refresh token |
+| `/auth/refresh` | POST | 刷新 access token |
+| `/auth/logout` | POST | 登出（当前为成功占位） |
 
-响应类型：`text/event-stream`
+### 4.4 调试与联调
+| 端点 | 方法 | 说明 |
+|---|---|---|
+| `/playground/runtime` | GET | 返回运行时配置摘要 |
+| `/` | GET | 服务健康信息 |
+| `/playground/` | GET | 静态联调页面 |
 
-正常事件顺序：
+## 5. SSE 事件契约
+标准顺序：
 1. `message_start`
 2. `content_delta`（0..n）
 3. `tool_call` / `tool_result`（0..n）
-4. `final`
-5. `message_end`
+4. `final`（成功路径）
+5. `error`（失败路径）
+6. `message_end`
 
-### 5.2 SSE 事件结构
+事件字段（当前实现）：
 
-`message_start`
+- `message_start`: `message_id`, `trace_id`
+- `content_delta`: `delta`, `seq`, `trace_id`
+- `tool_call`: `tool_name`, `args`, `trace_id`
+- `tool_result`: `tool_name`, `result_summary`, `references`, `trace_id`
+- `final`: `message_id`, `summary`, `references`, `rule_version`, `finish_reason`, `trace_id`
+- `error`: `code`, `message`, `retryable`, `trace_id`
+- `message_end`: `message_id`, `trace_id`
 
-```json
-{"message_id":"msg_xxx"}
-```
-
-`content_delta`
-
-```json
-{"delta":"...","seq":13}
-```
-
-`tool_call`
-
-```json
-{"tool_name":"intent_router","args":{"topic":"termination"}}
-```
-
-`tool_result`
-
-```json
-{"tool_name":"intent_router","result_summary":"classified as unlawful termination"}
-```
-
-`final`
-
-```json
-{"message_id":"msg_xxx","summary":"...","references":[],"rule_version":"v2.2"}
-```
-
-`message_end`
-
-```json
-{"message_id":"msg_xxx"}
-```
-
-`error`
-
-```json
-{"code":503,"message":"服务暂时不可用，您可稍后重试。","retryable":true}
-```
-
-## 6. 认证接口（二期）
-| 端点 | 方法 | 说明 |
-|---|---|---|
-| `/auth/sms/send` | POST | 发送验证码（当前为开发模拟） |
-| `/auth/sms/login` | POST | 验证码登录，返回 access/refresh token |
-| `/auth/refresh` | POST | 刷新 access token |
-| `/auth/logout` | POST | 登出（当前为接口预留） |
-
-## 7. 运行模式配置约束
+## 6. 运行模式约束
 | 配置项 | 可选值 | 说明 |
 |---|---|---|
-| `storage_backend` | `memory` / `postgres` | `postgres` 模式下会话锁与 seq 走 Redis |
-| `oh_use_mock` | `true` / `false` | `false` 时走真实 OpenHarness HTTP 流代理 |
-| `auth_mode` | `anonymous` / `jwt` | 决定归属解析与认证强制策略 |
+| `storage_backend` | `memory` / `postgres` | `postgres` 下会话锁与 seq 使用 Redis |
+| `oh_mode` | `mock` / `library` / `remote` | OpenHarness 执行模式 |
+| `oh_use_mock` | `true` / `false` | 为 true 时总是走 mock |
+| `auth_mode` | `anonymous` / `jwt` | 认证策略 |
 
-## 8. 兼容性规则
-- case/session 双层模型在一期到二期保持不变。
-- 客户端必须忽略未知响应字段，保证前后兼容。
-- SSE 解析器应忽略未知事件类型，避免升级时中断。
+## 7. 兼容性规则
+- 客户端必须忽略未知字段与未知事件类型。
+- 建议优先使用 `/chat/stream` 作为前端流式固定路径；`/chat` 持续兼容。

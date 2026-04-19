@@ -8,7 +8,7 @@
 ## 2. Main Flow
 - [ ] can create case and session as anonymous owner
 - [ ] chat stream renders token by token with seq ordering
-- [ ] summary and references can be queried after stream final
+- [ ] `final` 事件包含 `summary/references/rule_version/finish_reason`
 
 ## 3. Stability and Resilience
 - [ ] session lock conflict returns `409 SESSION_LOCKED`
@@ -16,7 +16,7 @@
 - [ ] dependency errors return mapped code and user-friendly message
 
 ## 4. Observability
-- [ ] every request has trace_id
+- [ ] every chat stream turn has trace_id
 - [ ] key metrics visible on dashboard
 - [ ] alerts fire and route correctly in staging drill
 
