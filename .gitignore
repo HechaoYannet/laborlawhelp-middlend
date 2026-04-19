@@ -15,3 +15,8 @@ venv/
 
 # Logs
 *.log
+
+# Environment files
+.env
+.env.*
+!.env.example
