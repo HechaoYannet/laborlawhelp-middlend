@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS messages (
     session_id UUID NOT NULL REFERENCES sessions(id),
     role VARCHAR(20) NOT NULL,
     content TEXT NOT NULL,
+    metadata JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
