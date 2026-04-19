@@ -22,6 +22,11 @@
 | `oh_use_mock` | 是 | `true` | 是否启用 mock |
 | `app_enable_local_rule_fallback` | 是 | `false` | 本地规则回退开关 |
 
+## 2.1 配置文件管理规范
+1. 仓库内仅保留 `backend/.env.example` 作为模板。
+2. 本地环境请复制为 `backend/.env` 后再填写真实配置。
+3. `backend/.env` 不入库（已在 `.gitignore` 忽略），禁止提交任何真实密钥、token、私有路径。
+
 ## 3. 启动检查清单
 1. PostgreSQL 与 Redis 连通性正常（仅 `postgres` 模式）。
 2. 执行建表脚本：`backend/sql/init_schema.sql`。

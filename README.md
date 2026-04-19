@@ -49,5 +49,11 @@
 - 前端流式 SDK：[`frontend-sdk/stream-chat.ts`](frontend-sdk/stream-chat.ts)
 - 烟雾脚本：[`scripts/smoke-chat.ps1`](scripts/smoke-chat.ps1)
 
+## 环境变量与安全约定
+
+- 本仓库仅维护模板文件：`backend/.env.example`。
+- 本地启动前请复制：`cp backend/.env.example backend/.env`（Windows 可使用 `copy`）。
+- `backend/.env` 属于本地私有配置，已加入 `.gitignore`，禁止提交真实 token / key / 私有路径。
+
 文档源约定：
 - OpenHarness 模块开发文档以 `docs/guide/openharness-module-development-and-integration.md` 为单一维护源。

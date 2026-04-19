@@ -9,6 +9,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+copy .env.example .env
 ```
 
 ### 1.2 conda 方式（可选）
@@ -18,7 +19,11 @@ cd backend
 conda create -n laborlawhelp-middlend python=3.11 -y
 conda activate laborlawhelp-middlend
 python -m pip install -r requirements.txt
+copy .env.example .env
 ```
+
+> Linux/macOS 可使用：`cp .env.example .env`。  
+> 注意：`.env` 仅用于本地私有配置，不应提交到仓库。
 
 ## 2. 启动 API
 
@@ -31,7 +36,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 - `storage_backend=memory`（默认）：内存模式，适合本地快速联调。
 - `storage_backend=postgres`：PostgreSQL + Redis 模式，适合开发/预发。
 
-`postgres` 模式示例 `.env`：
+`postgres` 模式示例（在 `.env` 中覆盖）：
 
 ```env
 storage_backend=postgres
