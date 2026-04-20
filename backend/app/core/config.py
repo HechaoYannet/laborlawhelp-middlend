@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     app_enable_local_rule_fallback: bool = False
     rate_limit_per_minute: int = 20
     session_lock_timeout_seconds: int = 30
+    cors_allow_origins: str = "http://localhost:5000,http://127.0.0.1:5000"
+    cors_allow_credentials: bool = True
+    cors_allow_methods: str = "*"
+    cors_allow_headers: str = "*"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -90,6 +94,18 @@ class Settings(BaseSettings):
         if not values:
             raise ValueError("oh_retry_backoff_seconds must contain at least one value")
         return tuple(values)
+
+    @property
+    def cors_allow_origins_list(self) -> list[str]:
+        return [item.strip() for item in self.cors_allow_origins.split(",") if item.strip()]
+
+    @property
+    def cors_allow_methods_list(self) -> list[str]:
+        return [item.strip() for item in self.cors_allow_methods.split(",") if item.strip()]
+
+    @property
+    def cors_allow_headers_list(self) -> list[str]:
+        return [item.strip() for item in self.cors_allow_headers.split(",") if item.strip()]
 
 
 settings = Settings()

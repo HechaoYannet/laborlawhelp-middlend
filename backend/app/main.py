@@ -3,6 +3,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 # Load .env into os.environ so OpenHarness settings can read PKULAW_MCP_* vars
@@ -15,6 +16,13 @@ from app.core.errors import AppError, app_error_handler
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version=settings.app_version)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allow_origins_list,
+        allow_credentials=settings.cors_allow_credentials,
+        allow_methods=settings.cors_allow_methods_list,
+        allow_headers=settings.cors_allow_headers_list,
+    )
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(cases.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
