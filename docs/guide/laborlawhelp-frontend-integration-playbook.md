@@ -28,7 +28,7 @@
 将咨询主链路改为：
 1. 先创建 case
 2. 再创建 session
-3. 最后调用 `POST /sessions/{session_id}/chat` 消费 SSE
+3. 最后调用 `POST /sessions/{session_id}/chat/stream` 消费 SSE
 
 即：
 - 前端负责输入、展示、状态机。
@@ -242,28 +242,21 @@ export async function streamChat(
 - `message_start`：创建 assistant 占位消息。
 - `content_delta`：追加文本到 assistant 消息。
 - `tool_call`：显示“处理中”状态条。
-- `tool_result`：更新工具状态摘要。
+- `tool_result`：更新工具状态摘要；若存在 `card_type/card_payload`，在消息流内渲染结构化结果卡。
 - `final`：更新右侧会话总结、引用信息、规则版本。
 - `message_end`：结束 loading，允许下次输入。
 - `error`：展示错误提示与重试按钮。
 
 ---
 
-## 9. 本地能力保留策略（回退）
-本地模块不要删除，但应从“主链路”降级到“回退链路”：
+## 9. 正式版主链路约束（中间件唯一）
 
-- 保留模块：
-  - `src/lib/calculation.ts`
-  - `src/lib/dialogue-flow.ts`
-  - `src/lib/document-generator.ts`
-  - `src/lib/case-triage.ts`
+正式版 consultation 页仅允许中间件主链路：
 
-- 回退触发条件（建议）：
-  1. 后端返回 `error.retryable=false` 且明确 fallback 标记。
-  2. 运维开关允许（例如 `NEXT_PUBLIC_ENABLE_LOCAL_FALLBACK=true`）。
-
-- 回退展示要求：
-  - 必须标注“本次结果来自回退逻辑”。
+1. `handleSend` 必须走 cases/sessions/chat-stream 的 SSE 流程。
+2. 禁止在生产路径中自动切回本地规则回复。
+3. 本地模块（`calculation/dialogue-flow/document-generator/case-triage`）仅可用于离线开发验证，不得作为线上兜底输出。
+4. 发生后端错误时，前端应展示可重试错误态，而不是拼接本地“回退结果”。
 
 ---
 
@@ -288,9 +281,9 @@ export async function streamChat(
 - 不改 UI 展示，仅接入调试日志。
 
 ### PR-2：主链路切换
-- `consultation/page.tsx` 切换到真实 cases/sessions/chat。
+- `consultation/page.tsx` 切换到真实 cases/sessions/chat/stream。
 - 接入全部 SSE 事件映射。
-- 保留本地回退但默认关闭。
+- 保留本地模块仅用于离线开发验证，不进入生产自动回退路径。
 
 ### PR-3：体验收口
 - 右侧摘要/引用/流程状态改为 `final` 事件驱动。
@@ -307,6 +300,7 @@ export async function streamChat(
 3. `content_delta` 文本连续、无乱序。
 4. `final` 信息可更新到会话摘要区域。
 5. `message_end` 后输入框恢复可用。
+6. `tool_result` 的 `card_*` 字段可驱动 UI 渲染要素卡/测算卡/文书卡/律师卡。
 
 ## 12.2 异常验收
 1. 模拟 409：前端能提示并重试。

@@ -159,6 +159,8 @@ def test_legal_minimal_tool_policy_keeps_skill_and_pkulaw_tools() -> None:
     registry.register(SimpleNamespace(name="skill"))
     registry.register(SimpleNamespace(name="mcp__pkulaw__fatiao_keyword"))
     registry.register(SimpleNamespace(name="read_mcp_resource"))
+    registry.register(SimpleNamespace(name="labor_fact_extract"))
+    registry.register(SimpleNamespace(name="labor_lawyer_recommend"))
     registry.register(SimpleNamespace(name="bash"))
 
     fake_bundle = SimpleNamespace(tool_registry=registry, engine=SimpleNamespace())
@@ -169,4 +171,66 @@ def test_legal_minimal_tool_policy_keeps_skill_and_pkulaw_tools() -> None:
     assert "skill" in kept
     assert "mcp__pkulaw__fatiao_keyword" in kept
     assert "read_mcp_resource" in kept
+    assert "labor_fact_extract" in kept
+    assert "labor_lawyer_recommend" in kept
     assert "bash" not in kept
+
+
+def test_library_mode_builds_card_metadata_for_local_compensation_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings.oh_mode = "library"
+    settings.oh_use_mock = False
+
+    @dataclass(frozen=True)
+    class ToolExecutionCompleted:
+        tool_name: str
+        output: str
+        is_error: bool = False
+
+    @dataclass(frozen=True)
+    class AssistantTurnComplete:
+        message: ConversationMessage
+        usage: object | None = None
+
+    class FakeEngine:
+        async def submit_message(self, prompt: str):
+            _ = prompt
+            yield ToolExecutionCompleted(
+                tool_name="labor_compensation_calc",
+                output='{"calculations":[{"item":"违法解除赔偿金（2N）","formula":"12000 × 2 = 24000","amount":24000}],"total_amount":24000,"input_summary":{"work_years":2}}',
+            )
+            yield AssistantTurnComplete(
+                ConversationMessage(
+                    role="assistant",
+                    content=[TextBlock(text="已完成测算")],
+                )
+            )
+
+    fake_bundle = SimpleNamespace(
+        engine=FakeEngine(),
+        tool_registry=ToolRegistry(),
+        mcp_manager=SimpleNamespace(list_statuses=lambda: []),
+    )
+
+    async def fake_get_or_create_bundle(session_id: str | None):
+        _ = session_id
+        return fake_bundle
+
+    fake_events_module = SimpleNamespace(
+        ToolExecutionCompleted=ToolExecutionCompleted,
+        AssistantTurnComplete=AssistantTurnComplete,
+        AssistantTextDelta=type("AssistantTextDelta", (), {}),
+        ToolExecutionStarted=type("ToolExecutionStarted", (), {}),
+        ErrorEvent=type("ErrorEvent", (), {}),
+    )
+
+    client = OpenHarnessClient()
+    monkeypatch.setattr(client, "_get_or_create_bundle", fake_get_or_create_bundle)
+    monkeypatch.setattr("app.adapters.openharness_client._load_oh_modules", lambda: (object(), fake_events_module))
+
+    chunks = _collect(client)
+    tool_result = next(chunk for chunk in chunks if chunk.type == "tool_result")
+    assert tool_result.metadata is not None
+    assert tool_result.metadata["card_type"] == "compensation"
+    assert tool_result.metadata["card_title"] == "测算赔偿项目"
+    assert isinstance(tool_result.metadata["card_payload"], dict)
+    assert tool_result.metadata["card_actions"][0]["action"] == "generate_document"

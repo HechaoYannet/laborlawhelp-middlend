@@ -74,6 +74,10 @@ async def stream_chat(owner: Owner, session_id: str, request: ChatRequest):
                             "tool_name": chunk.tool_name,
                             "result_summary": tool_metadata.get("result_summary") or tool_metadata.get("status", "ok"),
                             "references": tool_metadata.get("references", []),
+                            "card_type": tool_metadata.get("card_type"),
+                            "card_title": tool_metadata.get("card_title"),
+                            "card_payload": tool_metadata.get("card_payload"),
+                            "card_actions": tool_metadata.get("card_actions", []),
                             "trace_id": trace_id,
                         },
                     )

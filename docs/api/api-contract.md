@@ -69,23 +69,55 @@
 | `/playground/` | GET | 静态联调页面 |
 
 ## 5. SSE 事件契约
-标准顺序：
-1. `message_start`
+
+### 5.1 事件顺序与收尾规则
+单轮 assistant 响应的标准事件序列：
+
+1. `message_start`（恰好 1 次）
 2. `content_delta`（0..n）
-3. `tool_call` / `tool_result`（0..n）
-4. `final`（成功路径）
-5. `error`（失败路径）
-6. `message_end`
+3. `tool_call` / `tool_result`（0..n，可与 `content_delta` 交错）
+4. `final`（成功路径 0..1）
+5. `error`（失败路径 0..1）
+6. `message_end`（恰好 1 次）
 
-事件字段（当前实现）：
+规则：
+- `final` 与 `error` 至多出现一个。
+- 无论成功或失败，服务端均以 `message_end` 收尾。
+- 客户端必须以 `message_end` 作为该轮流结束信号。
 
-- `message_start`: `message_id`, `trace_id`
-- `content_delta`: `delta`, `seq`, `trace_id`
-- `tool_call`: `tool_name`, `args`, `trace_id`
-- `tool_result`: `tool_name`, `result_summary`, `references`, `trace_id`
-- `final`: `message_id`, `summary`, `references`, `rule_version`, `finish_reason`, `trace_id`
-- `error`: `code`, `message`, `retryable`, `trace_id`
-- `message_end`: `message_id`, `trace_id`
+### 5.2 事件字段定义（当前实现）
+
+`message_start`
+- 必填：`message_id`, `trace_id`
+
+`content_delta`
+- 必填：`delta`, `seq`, `trace_id`
+
+`tool_call`
+- 必填：`tool_name`, `trace_id`
+- 可选：`args`
+
+`tool_result`
+- 必填：`tool_name`, `result_summary`, `references`, `trace_id`
+- 可选扩展：
+  - `card_type`：卡片类型（如 `fact_summary` / `compensation` / `document` / `lawyer_referral`）
+  - `card_title`：卡片标题
+  - `card_payload`：结构化卡片数据对象
+  - `card_actions`：卡片动作数组，元素结构为 `{ action: string, label: string }`
+
+`final`
+- 必填：`message_id`, `summary`, `references`, `rule_version`, `finish_reason`, `trace_id`
+
+`error`
+- 必填：`code`, `message`, `retryable`, `trace_id`
+
+`message_end`
+- 必填：`message_id`, `trace_id`
+
+### 5.3 扩展与兼容规则
+- 客户端必须忽略未知事件与未知字段。
+- 服务端新增字段时不得改变既有字段语义。
+- 新能力优先通过事件字段扩展实现（例如 `tool_result.card_*`），避免增加事件类型导致兼容成本上升。
 
 ## 6. 运行模式约束
 | 配置项 | 可选值 | 说明 |
@@ -98,3 +130,4 @@
 ## 7. 兼容性规则
 - 客户端必须忽略未知字段与未知事件类型。
 - 建议优先使用 `/chat/stream` 作为前端流式固定路径；`/chat` 持续兼容。
+- `tool_result` 扩展字段为向后兼容增强：旧客户端可仅消费 `result_summary/references`，新客户端可按 `card_*` 渲染结构化卡片。

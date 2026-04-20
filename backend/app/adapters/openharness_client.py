@@ -224,7 +224,91 @@ def _resolve_rule_version(policy_version: str | None) -> str:
 _LOCAL_LABOR_TOOLS = frozenset({
     "labor_compensation_calc",
     "labor_document_gen",
+    "labor_fact_extract",
+    "labor_lawyer_recommend",
 })
+
+
+def _safe_json_dict(raw_output: str) -> dict[str, Any] | None:
+    parsed = _try_parse_structured_output(raw_output)
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _build_card_metadata(tool_name: str | None, raw_output: str) -> dict[str, Any] | None:
+    payload = _safe_json_dict(raw_output)
+    if not payload:
+        return None
+
+    if tool_name == "labor_fact_extract":
+        return {
+            "card_type": "fact_summary",
+            "card_title": "要素抽取与案情摘要",
+            "card_payload": {
+                "extracted_facts": payload.get("extracted_facts", {}),
+                "dispute_types": payload.get("dispute_types", []),
+                "info_completeness": payload.get("info_completeness"),
+                "missing_info": payload.get("missing_info", []),
+                "suggested_questions": payload.get("suggested_questions", []),
+                "ready_for_calculation": payload.get("ready_for_calculation"),
+            },
+            "card_actions": [
+                {"action": "continue_consultation", "label": "继续补充案情"},
+            ],
+        }
+
+    if tool_name == "labor_compensation_calc":
+        return {
+            "card_type": "compensation",
+            "card_title": "测算赔偿项目",
+            "card_payload": {
+                "input_summary": payload.get("input_summary", {}),
+                "calculations": payload.get("calculations", []),
+                "total_amount": payload.get("total_amount"),
+                "comparison": payload.get("comparison"),
+                "legal_basis": payload.get("legal_basis", []),
+            },
+            "card_actions": [
+                {"action": "generate_document", "label": "生成文书"},
+                {"action": "copy_summary", "label": "复制测算摘要"},
+            ],
+        }
+
+    if tool_name == "labor_document_gen":
+        document_type = str(payload.get("document_type", ""))
+        card_type = "document"
+        if "证据" in document_type:
+            card_type = "evidence"
+        elif "行动清单" in document_type:
+            card_type = "action_checklist"
+        elif "仲裁申请" in document_type:
+            card_type = "arbitration_application"
+        elif "摘要" in document_type:
+            card_type = "case_summary"
+
+        return {
+            "card_type": card_type,
+            "card_title": "文书生成",
+            "card_payload": payload,
+            "card_actions": [
+                {"action": "copy_document", "label": "复制文书"},
+                {"action": "download_document", "label": "下载文书"},
+            ],
+        }
+
+    if tool_name == "labor_lawyer_recommend":
+        return {
+            "card_type": "lawyer_referral",
+            "card_title": "繁简分流与律师转介",
+            "card_payload": payload,
+            "card_actions": [
+                {"action": "copy_referral", "label": "复制转介摘要"},
+                {"action": "book_lawyer", "label": "预约咨询"},
+            ],
+        }
+
+    return None
 
 
 def _tool_allowed_by_policy(tool_name: str, policy: str) -> bool:
@@ -390,6 +474,7 @@ class OpenHarnessClient:
                 elif isinstance(event, events_mod.ToolExecutionCompleted):
                     references = _extract_references_from_output(event.output, event.tool_name)
                     gathered_references.extend(references)
+                    card_metadata = _build_card_metadata(event.tool_name, event.output)
                     yield OHChunk(
                         type="tool_result",
                         tool_name=event.tool_name,
@@ -403,6 +488,10 @@ class OpenHarnessClient:
                                 is_error=event.is_error,
                             ),
                             "references": references,
+                            "card_type": card_metadata.get("card_type") if card_metadata else None,
+                            "card_title": card_metadata.get("card_title") if card_metadata else None,
+                            "card_payload": card_metadata.get("card_payload") if card_metadata else None,
+                            "card_actions": card_metadata.get("card_actions") if card_metadata else [],
                         },
                     )
                 elif isinstance(event, events_mod.AssistantTurnComplete):

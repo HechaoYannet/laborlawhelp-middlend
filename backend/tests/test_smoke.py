@@ -100,6 +100,12 @@ def test_main_flow_stream_events() -> None:
     assert final["trace_id"]
     assert final["finish_reason"]
 
+    tool_result = next(data for event, data in events if event == "tool_result")
+    assert "card_type" in tool_result
+    assert "card_title" in tool_result
+    assert "card_payload" in tool_result
+    assert "card_actions" in tool_result
+
 
 def test_chat_stream_alias_has_same_event_contract() -> None:
     client = TestClient(app)

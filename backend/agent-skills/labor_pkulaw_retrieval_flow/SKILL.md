@@ -19,8 +19,10 @@ description: |
 ### 本地计算与文书工具
 | 工具名 | 用途 |
 |--------|------|
+| `labor_fact_extract` | 提取案情要素、识别缺失字段、判断是否可进入计算/文书阶段 |
 | `labor_compensation_calc` | 计算经济补偿(N)/赔偿金(2N)/双倍工资差额，含陕西到手工资规则 |
 | `labor_document_gen` | 生成仲裁申请书/证据清单/行动清单/案情摘要卡片 |
+| `labor_lawyer_recommend` | 输出复杂度分流、风险标签、律师推荐列表与转介摘要 |
 
 ## 触发条件
 
@@ -128,6 +130,30 @@ mcp__pkulaw__search_article(text="陕西省 劳动合同 地方规定")
 3. **仲裁申请书** (`arbitration_application`)：用户明确要申请仲裁时生成
 4. **证据清单** (`evidence_list`)：辅助用户准备材料
 
+### 第五阶段：繁简分流与律师转介
+
+当满足任一条件时，调用 `labor_lawyer_recommend`：
+
+1. 用户明确表示“找律师/转介律师/预约律师”
+2. 争议金额较高、证据不足或接近仲裁时效
+3. 案情复杂度高（多争议点、复合诉求）
+
+调用时传入：
+- `dispute_types`
+- `compensation_amount`
+- `info_completeness`
+- `has_written_contract`
+- `has_social_insurance`
+- `has_core_evidence`
+- `near_deadline`
+- `region`
+
+返回后必须向用户展示：
+- 复杂度分级（simple/moderate/complex）
+- 风险标签
+- 推荐律师列表
+- 建议动作（复制摘要、预约咨询）
+
 ## 输出格式要求
 
 最终回答必须包含以下结构化板块（按顺序）：
@@ -178,3 +204,4 @@ mcp__pkulaw__search_article(text="陕西省 劳动合同 地方规定")
 5. **双层输出**：重要法律概念同时给出通俗解释和专业表述
 6. **缺失信息声明**：信息不足时必须说明哪些字段缺失、会如何影响结论
 7. **工具失败回退**：若 PKULaw 工具全部调用失败，必须明确说明"法律依据待在线核验，以下结论仅供参考"
+8. **卡片驱动输出**：凡调用 `labor_fact_extract`、`labor_compensation_calc`、`labor_document_gen`、`labor_lawyer_recommend`，均应通过工具结果触发结构化卡片，不得仅在文本中口头声明“已生成”。

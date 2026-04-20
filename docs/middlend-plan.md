@@ -16,6 +16,7 @@
 - 前端不承载法律结论主逻辑。
 - 中间件负责治理与协议稳定，不直接实现法律规则引擎。
 - 智能能力通过 OpenHarness（`mock/library/remote`）接入。
+- consultation 正式版以中间件为唯一在线主链路，错误场景返回可重试错误态，不依赖前端本地回退生成结果。
 
 ---
 
@@ -60,6 +61,14 @@
 
 每轮会话会生成 `trace_id` 并写入事件载荷，`final` 事件包含 `finish_reason`。
 
+`tool_result` 在基础字段（`tool_name/result_summary/references/trace_id`）外，已支持可选扩展字段：
+- `card_type`
+- `card_title`
+- `card_payload`
+- `card_actions`
+
+用于在前端直接渲染结构化结果卡（要素抽取、赔偿测算、文书生成、律师转介）。
+
 ---
 
 #### 5. 认证与运行模式
@@ -72,6 +81,16 @@ OpenHarness：
 - `oh_use_mock=true`：强制 mock
 - `oh_mode=library`：OpenHarness library runtime
 - `oh_mode=remote`：HTTP 上游流代理
+
+`oh_lib_tool_policy=legal_minimal` 下保留的关键工具面：
+- `skill`
+- `mcp__pkulaw__*`
+- `list_mcp_resources`
+- `read_mcp_resource`
+- `labor_fact_extract`
+- `labor_compensation_calc`
+- `labor_document_gen`
+- `labor_lawyer_recommend`
 
 ---
 
