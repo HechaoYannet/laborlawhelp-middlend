@@ -437,6 +437,31 @@ class OpenHarnessClient:
         except AppError:
             raise
         except Exception as exc:
+            # Graceful degradation: when the agent exhausts its turn budget
+            # (MaxTurnsExceeded), return whatever text and references have
+            # been accumulated so far instead of surfacing a raw error.
+            if type(exc).__name__ == "MaxTurnsExceeded":
+                full_text = "".join(full_text_parts).strip()
+                logger.warning(
+                    "oh_library_max_turns_graceful trace_id=%s max_turns=%s "
+                    "collected_text_len=%d refs=%d",
+                    trace_id,
+                    getattr(exc, "max_turns", "?"),
+                    len(full_text),
+                    len(gathered_references),
+                )
+                yield OHChunk(
+                    type="final",
+                    metadata={
+                        "summary": _build_summary(full_text),
+                        "references": _dedupe_references(gathered_references),
+                        "rule_version": _resolve_rule_version(policy_version),
+                        "finish_reason": "max_turns",
+                        "trace_id": trace_id,
+                        "retry_count": 0,
+                    },
+                )
+                return
             raise AppError(
                 status_code=502,
                 code="OH_SERVICE_ERROR",

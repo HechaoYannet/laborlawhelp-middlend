@@ -138,7 +138,7 @@ def test_library_mode_enriches_final_with_pkulaw_references(monkeypatch: pytest.
     )
 
     assert fake_engine.last_prompt
-    assert 'skill(name="labor_pkulaw_retrieval_flow")' in fake_engine.last_prompt
+    assert 'skill(name="labor-pkulaw-retrieval-flow")' in fake_engine.last_prompt
     assert "mcp__pkulaw__" in fake_engine.last_prompt
     assert "shaanxi.illegal_termination.v1" in fake_engine.last_prompt
 

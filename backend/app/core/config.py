@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     oh_base_url: str = "http://localhost:8080"
     oh_stream_path: str = "/api/v1/stream-run"
-    oh_api_key: str = "sk-local"
+    oh_api_key: str = "sk-9b68e283d1e5416da3cc2276f72ddf63"
     oh_default_workflow: str = "labor_consultation"
     oh_use_mock: bool = True
     oh_mode: str = "mock"  # mock / library / remote
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     oh_lib_api_format: str = "openai"
     oh_lib_base_url: str = ""
     oh_lib_api_key: str = ""
-    oh_lib_max_turns: int = 10
+    oh_lib_max_turns: int = 20
     oh_lib_cwd: str = ""
     oh_lib_tool_policy: str = "legal_minimal"  # legal_minimal / full
     oh_connect_timeout_sec: float = 5.0
