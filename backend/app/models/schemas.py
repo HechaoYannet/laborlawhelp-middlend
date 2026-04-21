@@ -49,6 +49,7 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     created_at: str
+    metadata: dict | None = None
 
 
 class SmsSendRequest(BaseModel):
