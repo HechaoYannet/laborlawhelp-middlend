@@ -93,7 +93,16 @@ async def list_sessions_endpoint(case_id: str, owner: Owner = Depends(resolve_ow
 @router.get("/sessions/{session_id}/messages", response_model=list[MessageResponse], tags=["sessions"])
 async def list_messages_endpoint(session_id: str, owner: Owner = Depends(resolve_owner)):
     records = await list_messages(owner, session_id)
-    return [MessageResponse(id=m.id, role=m.role, content=m.content, created_at=m.created_at) for m in records]
+    return [
+        MessageResponse(
+            id=m.id,
+            role=m.role,
+            content=m.content,
+            created_at=m.created_at,
+            metadata=m.metadata,
+        )
+        for m in records
+    ]
 
 
 @router.patch("/sessions/{session_id}/end", response_model=EndSessionResponse, tags=["sessions"])
