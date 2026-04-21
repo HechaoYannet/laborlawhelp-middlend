@@ -5,12 +5,12 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 
-from app.adapters.openharness_client import OHChunk
+from app.adapters.openharness import OHChunk
 from app.core import rate_limit
 from app.core.config import settings
 from app.core.errors import AppError
-from app.core.store import InMemoryStore, store
 from app.main import app
+from app.modules.storage import InMemoryStore, get_store, set_store
 
 
 @pytest.fixture(autouse=True)
@@ -25,13 +25,8 @@ def reset_runtime_state() -> Generator[None, None, None]:
     settings.rate_limit_per_minute = 20
     settings.oh_use_mock = True
 
-    if isinstance(store, InMemoryStore):
-        store.cases.clear()
-        store.sessions.clear()
-        store.messages.clear()
-        store.audit_logs.clear()
-        store.session_locks.clear()
-        store.stream_seq.clear()
+    test_store = InMemoryStore()
+    set_store(test_store)
 
     rate_limit._RATE_COUNTER.clear()
 
@@ -41,6 +36,7 @@ def reset_runtime_state() -> Generator[None, None, None]:
     settings.storage_backend = old_storage_backend
     settings.rate_limit_per_minute = old_rate
     settings.oh_use_mock = old_oh_mock
+    set_store(InMemoryStore())
 
 
 def _create_case_and_session(client: TestClient, token: str) -> tuple[str, str]:
@@ -200,7 +196,7 @@ def test_stream_error_event_shape_and_failed_assistant_metadata(monkeypatch: pyt
         yield OHChunk(type="text", content="开头文本")
         raise AppError(504, "OH_UPSTREAM_TIMEOUT", "OpenHarness 请求超时", retryable=True)
 
-    monkeypatch.setattr("app.services.chat_service.openharness_client.stream_run", broken_stream_run)
+    monkeypatch.setattr("app.modules.chat.service.openharness_client.stream_run", broken_stream_run)
 
     with client.stream(
         "POST",
@@ -222,6 +218,7 @@ def test_stream_error_event_shape_and_failed_assistant_metadata(monkeypatch: pyt
     assert error["code"] == "OH_UPSTREAM_TIMEOUT"
     assert error["retryable"] is True
 
+    store = get_store()
     assert isinstance(store, InMemoryStore)
     assistant_messages = [m for m in store.messages if m.session_id == session_id and m.role == "assistant"]
     assert assistant_messages

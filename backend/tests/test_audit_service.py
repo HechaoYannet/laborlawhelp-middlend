@@ -1,7 +1,7 @@
 import asyncio
 
-from app.core.store import InMemoryStore
-from app.services.audit_service import AuditService
+from app.modules.chat.audit import AuditService
+from app.modules.storage import InMemoryStore
 
 
 def test_audit_service_records_success_and_failure() -> None:

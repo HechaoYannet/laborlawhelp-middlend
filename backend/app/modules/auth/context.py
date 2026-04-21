@@ -4,7 +4,7 @@ from fastapi import Header
 
 from app.core.config import settings
 from app.core.errors import AppError
-from app.core.jwt_utils import decode_token
+from app.modules.auth.tokens import decode_token
 
 
 @dataclass

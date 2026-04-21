@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from app.core.auth import Owner, resolve_owner
 from app.core.errors import AppError
 from app.core.rate_limit import check_rate_limit
-from app.models.schemas import ChatRequest
-from app.services.chat_service import stream_chat
-from app.services.session_service import get_session
+from app.modules.auth import Owner, resolve_owner
+from app.modules.case_session.service import get_session
+from app.modules.chat.schemas import ChatRequest
+from app.modules.chat.service import stream_chat
 
 router = APIRouter(tags=["chat"])
 

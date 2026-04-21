@@ -1,7 +1,7 @@
 import json
 import logging
 
-from app.core.store import BaseStore
+from app.modules.storage import BaseStore
 
 logger = logging.getLogger(__name__)
 

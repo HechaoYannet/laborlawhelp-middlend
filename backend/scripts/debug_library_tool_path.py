@@ -23,7 +23,7 @@ if str(OPENHARNESS_SRC) not in sys.path:
 
 load_dotenv(BACKEND_ROOT / ".env", override=False)
 
-from app.adapters.openharness_client import _apply_tool_policy  # noqa: E402
+from app.adapters.openharness import _apply_tool_policy  # noqa: E402
 from app.core.config import settings  # noqa: E402
 from openharness.api.openai_client import OpenAICompatibleClient  # noqa: E402
 from openharness.engine import stream_events as events_mod  # noqa: E402

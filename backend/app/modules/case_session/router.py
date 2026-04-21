@@ -1,14 +1,29 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
 
-from app.core.auth import Owner, resolve_owner
-from app.models.schemas import CaseResponse, CreateCaseRequest, CreateSessionResponse
-from app.services.case_service import create_case, get_case, list_cases
-from app.services.session_service import create_session, list_sessions
+from app.modules.auth import Owner, resolve_owner
+from app.modules.case_session.schemas import (
+    CaseResponse,
+    CreateCaseRequest,
+    CreateSessionResponse,
+    EndSessionResponse,
+    MessageResponse,
+)
+from app.modules.case_session.service import (
+    create_case,
+    create_session,
+    end_session,
+    get_case,
+    list_cases,
+    list_messages,
+    list_sessions,
+)
 
-router = APIRouter(tags=["cases"])
+router = APIRouter()
 
 
-@router.post("/cases", response_model=CaseResponse, status_code=201)
+@router.post("/cases", response_model=CaseResponse, status_code=201, tags=["cases"])
 async def create_case_endpoint(payload: CreateCaseRequest, owner: Owner = Depends(resolve_owner)):
     record = await create_case(owner, payload.title, payload.region_code)
     return CaseResponse(
@@ -21,7 +36,7 @@ async def create_case_endpoint(payload: CreateCaseRequest, owner: Owner = Depend
     )
 
 
-@router.get("/cases", response_model=list[CaseResponse])
+@router.get("/cases", response_model=list[CaseResponse], tags=["cases"])
 async def list_cases_endpoint(owner: Owner = Depends(resolve_owner)):
     records = await list_cases(owner)
     return [
@@ -37,7 +52,7 @@ async def list_cases_endpoint(owner: Owner = Depends(resolve_owner)):
     ]
 
 
-@router.get("/cases/{case_id}", response_model=CaseResponse)
+@router.get("/cases/{case_id}", response_model=CaseResponse, tags=["cases"])
 async def get_case_endpoint(case_id: str, owner: Owner = Depends(resolve_owner)):
     record = await get_case(owner, case_id)
     return CaseResponse(
@@ -50,7 +65,7 @@ async def get_case_endpoint(case_id: str, owner: Owner = Depends(resolve_owner))
     )
 
 
-@router.post("/cases/{case_id}/sessions", response_model=CreateSessionResponse, status_code=201)
+@router.post("/cases/{case_id}/sessions", response_model=CreateSessionResponse, status_code=201, tags=["cases"])
 async def create_session_endpoint(case_id: str, owner: Owner = Depends(resolve_owner)):
     session = await create_session(owner, case_id)
     return CreateSessionResponse(
@@ -61,7 +76,7 @@ async def create_session_endpoint(case_id: str, owner: Owner = Depends(resolve_o
     )
 
 
-@router.get("/cases/{case_id}/sessions", response_model=list[CreateSessionResponse])
+@router.get("/cases/{case_id}/sessions", response_model=list[CreateSessionResponse], tags=["cases"])
 async def list_sessions_endpoint(case_id: str, owner: Owner = Depends(resolve_owner)):
     records = await list_sessions(owner, case_id)
     return [
@@ -73,3 +88,19 @@ async def list_sessions_endpoint(case_id: str, owner: Owner = Depends(resolve_ow
         )
         for s in records
     ]
+
+
+@router.get("/sessions/{session_id}/messages", response_model=list[MessageResponse], tags=["sessions"])
+async def list_messages_endpoint(session_id: str, owner: Owner = Depends(resolve_owner)):
+    records = await list_messages(owner, session_id)
+    return [MessageResponse(id=m.id, role=m.role, content=m.content, created_at=m.created_at) for m in records]
+
+
+@router.patch("/sessions/{session_id}/end", response_model=EndSessionResponse, tags=["sessions"])
+async def end_session_endpoint(session_id: str, owner: Owner = Depends(resolve_owner)):
+    session = await end_session(owner, session_id)
+    return EndSessionResponse(
+        id=session.id,
+        status=session.status,
+        ended_at=datetime.now(timezone.utc).isoformat(),
+    )
