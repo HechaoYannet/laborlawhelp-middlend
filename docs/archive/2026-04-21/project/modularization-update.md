@@ -36,56 +36,58 @@
 ### 模块 B：认证与请求上下文
 
 - 当前内容：
-  `backend/app/core/auth.py`、`backend/app/core/jwt_utils.py`、`backend/app/api/v1/routes/auth.py` 共同承担 owner 识别、JWT 编解码、短信登录模拟接口。
+  `backend/app/modules/auth/` 统一承担 owner 识别、JWT 编解码、认证模型与认证 HTTP 端点。
 - 当前问题：
   认证策略、令牌处理、认证接口分散在 core 与 route 之间，语义上属于同一功能域。
 - 模块化目标：
   形成统一的认证模块边界，区分“认证协议”“令牌能力”“HTTP 端点”。
 - 涉及文件：
-  `backend/app/core/auth.py`
-  `backend/app/core/jwt_utils.py`
-  `backend/app/api/v1/routes/auth.py`
+  `backend/app/modules/auth/context.py`
+  `backend/app/modules/auth/router.py`
+  `backend/app/modules/auth/schemas.py`
+  `backend/app/modules/auth/service.py`
+  `backend/app/modules/auth/tokens.py`
 - 审批状态：
   `已审批，实施完成`
 - 实施后核心变化：
-  `认证协议、JWT 能力、请求上下文解析与认证 HTTP 端点已收束到 auth 模块；旧 core/auth.py、core/jwt_utils.py、api/v1/routes/auth.py 保留为兼容层。`
+  `认证协议、JWT 能力、请求上下文解析与认证 HTTP 端点已收束到 auth 模块；旧 core/auth.py、core/jwt_utils.py 与纯 route 兼容层已在后续收缩中清理。`
 
 ### 模块 C：案件与会话领域
 
 - 当前内容：
-  `backend/app/api/v1/routes/cases.py`、`backend/app/api/v1/routes/sessions.py`、`backend/app/services/case_service.py`、`backend/app/services/session_service.py`、`backend/app/models/schemas.py` 中的相关请求响应模型共同实现案件与会话管理。
+  `backend/app/modules/case_session/` 统一承担案件、会话、消息列表与结束会话能力；`backend/app/models/schemas.py` 保留兼容导出。
 - 当前问题：
   路由、服务、响应模型按技术层拆分，但案件与会话作为同一业务域尚未形成聚合边界。
 - 模块化目标：
   围绕“案件”“会话”“消息列表/结束会话”做纵向聚合，减少跨文件跳转成本。
 - 涉及文件：
-  `backend/app/api/v1/routes/cases.py`
-  `backend/app/api/v1/routes/sessions.py`
-  `backend/app/services/case_service.py`
-  `backend/app/services/session_service.py`
+  `backend/app/modules/case_session/router.py`
+  `backend/app/modules/case_session/service.py`
+  `backend/app/modules/case_session/schemas.py`
   `backend/app/models/schemas.py`
 - 审批状态：
   `已审批，实施完成`
 - 实施后核心变化：
-  `案件、会话、消息读取、结束会话相关模型/服务/路由已聚合为同一业务模块；旧 service 与 route 路径保留为兼容层，避免现有引用立即失效。`
+  `案件、会话、消息读取、结束会话相关模型/服务/路由已聚合为同一业务模块；旧 service 与纯 route 兼容层已在后续收缩中清理。`
 
 ### 模块 D：聊天编排与流式响应
 
 - 当前内容：
-  `backend/app/api/v1/routes/chat.py`、`backend/app/services/chat_service.py`、`backend/app/core/sse.py`、`backend/app/services/audit_service.py` 共同实现聊天入口、SSE 输出、消息持久化、失败兜底与审计写入。
+  `backend/app/modules/chat/` 统一承担聊天入口、请求模型、编排服务、SSE 事件拼装与审计记录。
 - 当前问题：
   `chat_service.py` 同时承担会话校验、持久化、事件映射、错误处理、日志与审计，职责过重。
 - 模块化目标：
   将聊天主流程拆成更清晰的“会话前置校验”“流事件编排”“结果落库/审计”边界，不改变 SSE 契约。
 - 涉及文件：
-  `backend/app/api/v1/routes/chat.py`
-  `backend/app/services/chat_service.py`
+  `backend/app/modules/chat/router.py`
+  `backend/app/modules/chat/service.py`
+  `backend/app/modules/chat/events.py`
+  `backend/app/modules/chat/audit.py`
   `backend/app/core/sse.py`
-  `backend/app/services/audit_service.py`
 - 审批状态：
   `已审批，实施完成`
 - 实施后核心变化：
-  `聊天入口、请求模型、编排服务、SSE 事件拼装、审计记录已集中到 chat 模块；旧 chat_service 与旧 route 路径保留为兼容层。`
+  `聊天入口、请求模型、编排服务、SSE 事件拼装、审计记录已集中到 chat 模块；旧 service 与纯 route 兼容层已在后续收缩中清理。`
 
 ### 模块 E：OpenHarness 适配层
 
@@ -347,10 +349,11 @@
 - 主要职责：
   向前端暴露案件、会话、聊天、认证、调试入口；维护流式事件契约与前端接入示例。
 - 主要文件/文件夹：
+  `backend/app/api/v1/router.py`
+  `backend/app/modules/auth/router.py`
   `backend/app/modules/case_session/router.py`
   `backend/app/modules/chat/router.py`
-  `backend/app/api/v1/routes/auth.py`
-  `backend/app/api/v1/routes/playground.py`
+  `backend/app/modules/playground/router.py`
   `frontend-sdk/stream-chat.ts`
   `docs/api/api-contract.md`
   `docs/api/error-codes.md`
@@ -406,9 +409,6 @@
   `backend/app/services/session_service.py`
   `backend/app/services/chat_service.py`
   `backend/app/services/audit_service.py`
-  `backend/app/api/v1/routes/cases.py`
-  `backend/app/api/v1/routes/sessions.py`
-  `backend/app/api/v1/routes/chat.py`
   `backend/app/models/schemas.py`
 
 #### G. 调试与静态页面层
@@ -417,7 +417,7 @@
   提供联调 playground 与静态调试页面。
 - 主要文件/文件夹：
   `backend/app/static/playground/`
-  `backend/app/api/v1/routes/playground.py`
+  `backend/app/modules/playground/router.py`
 
 #### H. 测试、文档与辅助资产
 
@@ -550,7 +550,7 @@
 - `认证模块`
   `backend/app/core/auth.py`
   `backend/app/core/jwt_utils.py`
-  `backend/app/api/v1/routes/auth.py`
+  `backend/app/modules/auth/`
 - `应用入口与装配模块`
   `backend/app/main.py`
   `backend/app/bootstrap.py`
@@ -563,11 +563,10 @@
 - `存储与基础设施模块`
   `backend/app/core/store.py`
 - `调试与演示模块`
-  `backend/app/api/v1/routes/playground.py`
+  `backend/app/modules/playground/`
   `backend/app/static/playground/`
 - `兼容层模块`
   `backend/app/services/`
-  `backend/app/api/v1/routes/{cases,sessions,chat}.py`
   `backend/app/models/schemas.py`
 - `测试模块`
   `backend/tests/`
@@ -626,7 +625,7 @@
 - 对外行为变化：
   `无`
 - 测试与验证：
-  `已通过 py_compile 与导入级 smoke check，确认 auth 路由仍在 /api/v1 下被装配，旧 core/auth.py、core/jwt_utils.py、api/v1/routes/auth.py 仍可兼容导入。`
+  `已通过 py_compile 与导入级 smoke check，确认 auth 路由仍在 /api/v1 下被装配，旧 core/auth.py、core/jwt_utils.py 仍可兼容导入；纯 route 兼容层已在后续收缩中清理。`
 
 ### 7.3 模块 F：存储抽象与后端实现
 
@@ -763,7 +762,6 @@
   `backend/app/static/playground/`
 - 兼容层：
   `backend/app/services/`
-  `backend/app/api/v1/routes/`
   `backend/app/core/{auth,jwt_utils,store}.py`
   `backend/app/models/schemas.py`
 - 测试与文档资产：
@@ -825,8 +823,6 @@
 - `backend/app/core/auth.py`
 - `backend/app/core/jwt_utils.py`
 - `backend/app/core/store.py`
-- `backend/app/api/v1/routes/auth.py`
-- `backend/app/api/v1/routes/playground.py`
 - `backend/app/services/case_service.py`
 - `backend/app/services/session_service.py`
 - `backend/app/services/chat_service.py`
@@ -835,6 +831,10 @@
 - `backend/app/adapters/openharness_prompting.py`
 - `backend/app/adapters/openharness_enrichment.py`
 - `frontend-sdk/stream-chat.ts`
+
+补充说明：
+
+- `backend/app/api/v1/routes/{auth,cases,sessions,chat,playground}.py` 这组纯冗余 route 兼容层已在本轮清理，当前 HTTP 真实入口统一为 `backend/app/api/v1/router.py` 与 `backend/app/modules/*/router.py`。
 
 兼容层约束：
 

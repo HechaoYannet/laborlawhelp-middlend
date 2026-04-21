@@ -1,24 +1,24 @@
-# OpenHarness 智能层模块开发与对接文档
+# OpenHarness 智能层模块开发与对接说明
 
 ## 1. 文档目标与范围
 本文件用于规范 laborlawhelp-middlend 中 OpenHarness 智能层模块的设计、开发、联调与上线。
 
 适用范围：
-- 后端适配层：`backend/app/adapters/openharness_client.py`
-- 聊天编排层：`backend/app/services/chat_service.py`
+- 后端适配层：`backend/app/adapters/openharness/client.py`
+- 聊天编排层：`backend/app/modules/chat/service.py`
 - SSE 出流协议层：`backend/app/core/sse.py`
 - 配置层：`backend/app/core/config.py`
 
 不包含：
 - 业务规则引擎内部规则实现（仅定义对接边界）
-- 前端 UI 渲染细节（见 frontend-integration 文档）
+- 前端 UI 渲染细节（见 `frontend-integration` 文档）
 
 ---
 
 ## 2. 上游 OpenHarness 关键能力（对接依据）
 基于 OpenHarness 仓库当前公开实现，智能层对接应建立在以下稳定能力之上：
 
-1. Agent Loop
+1. 代理执行循环
 - 采用 query -> stream -> tool_use -> tool_result -> loop 的闭环执行模型。
 - 单轮可触发多个工具调用，并回传工具结果继续推理。
 
@@ -48,21 +48,21 @@
 ## 3. 本项目中的智能层分层设计
 
 ## 3.1 分层职责
-1. Route 层
+1. 路由层
 - 接收 `POST /api/v1/sessions/{session_id}/chat/stream`
 - 返回 `text/event-stream`
 
-2. Service 层
+2. 服务层
 - 会话归属校验
 - 写入用户消息
 - 调用 OpenHarness 适配器
 - 将 OpenHarness 事件映射为前端 SSE 契约
 
-3. Adapter 层（OpenHarnessClient）
+3. 适配层（`OpenHarnessClient`）
 - 提供 mock 与 remote 两种执行路径
 - 屏蔽上游协议细节（SSE 行格式、事件名差异、异常形态）
 
-4. Store 层
+4. 存储层
 - 消息持久化
 - 会话锁
 - 流序号（seq）
@@ -87,7 +87,7 @@
 - `args`: 工具参数（`type=tool_call`）
 - `metadata`: 扩展元数据（`type=tool_result/final`）
 
-## 4.2 Service 对前端 SSE 契约映射
+## 4.2 服务层对前端 SSE 契约映射
 | 适配器 chunk.type | SSE 事件 | data 字段 |
 |---|---|---|
 | `text` | `content_delta` | `delta`, `seq` |
@@ -100,7 +100,7 @@
 - 流结束：`message_end`
 - 异常兜底：`error`
 
-## 4.3 上游 remote 请求建议字段
+## 4.3 上游 `remote` 请求建议字段
 当前实现已发送：
 - `prompt`
 - `session_id`
@@ -131,7 +131,7 @@
 - 不依赖外部 OpenHarness 服务
 - 用于前后端联调、回归测试
 
-2. 集成联调/预发模式
+2. 集成联调 / 预发布模式
 - `oh_use_mock=false`
 - 指向真实 OpenHarness 网关
 - 必须开启鉴权与可观测性
@@ -231,7 +231,7 @@
 ## 10. 与现有代码的落地对照
 当前代码已具备以下基础能力：
 - `OpenHarnessClient` 的 mock 与 remote 双路径。
-- Service 层对 `text/tool_call/tool_result/final` 的映射。
+- 服务层对 `text/tool_call/tool_result/final` 的映射。
 - 统一 SSE 输出与 `message_start/message_end` 包裹。
 
 建议下一步优先补齐：

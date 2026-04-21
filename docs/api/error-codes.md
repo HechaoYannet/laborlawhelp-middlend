@@ -32,10 +32,12 @@
 
 ```text
 event: error
-data: {"code":"OH_UPSTREAM_TIMEOUT","message":"OpenHarness 请求超时","retryable":true,"trace_id":"..."}
+data: {"code":"OH_UPSTREAM_TIMEOUT","message":"API error: Request timed out.","retryable":true,"trace_id":"..."}
 ```
 
-说明：流式失败时服务器仍会发送 `message_end` 收尾。
+说明：
+- 流式失败时服务器仍会发送 `message_end` 收尾。
+- `OH_UPSTREAM_TIMEOUT` / `OH_SERVICE_ERROR` 在 library 模式下可能保留更接近上游真实错误的 message，而不是固定中文模板。
 
 ## 4. 客户端重试建议
 | 场景 | 推荐策略 |

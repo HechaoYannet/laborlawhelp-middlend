@@ -1,38 +1,38 @@
-# Deployment and Rollback (Dev + Staging)
+# 部署与回滚（开发 / 预发布）
 
-## 1. Release Strategy
-- Environment order: Dev -> Staging.
-- Use small-batch canary in staging where possible.
-- Keep `app_enable_local_rule_fallback=false` by default.
+## 1. 发布策略
+- 环境顺序：开发 -> 预发布。
+- 预发布环境尽量采用小批量金丝雀发布。
+- 默认保持 `app_enable_local_rule_fallback=false`。
 
-## 2. Pre-Deploy Checklist
-1. Migrations reviewed and approved.
-2. API contract change reviewed against frontend compatibility.
-3. Smoke test scripts updated.
-4. Alert rules enabled.
+## 2. 部署前检查清单
+1. 迁移脚本已完成评审并获批准。
+2. API 契约变更已核对前端兼容性。
+3. 冒烟测试脚本已更新。
+4. 告警规则已启用。
 
-## 3. Deploy Steps
-1. Apply migrations.
-2. Deploy API service.
-3. Run health check endpoints.
-4. Run chat stream smoke case.
-5. Confirm log and metrics ingestion.
+## 3. 部署步骤
+1. 执行迁移脚本。
+2. 部署 API 服务。
+3. 检查健康检查端点。
+4. 执行聊天流式冒烟用例。
+5. 确认日志与指标已正常采集。
 
-## 4. Rollback Triggers
-| Trigger | Action |
+## 4. 回滚触发条件
+| 触发条件 | 处理动作 |
 |---|---|
-| 5xx > 5% for 10m | rollback service image |
-| stream fatal errors spike | rollback service image |
-| migration causes data corruption risk | stop write traffic, execute rollback plan |
+| `5xx > 5% 持续 10 分钟` | 回滚服务镜像 |
+| 流式致命错误突增 | 回滚服务镜像 |
+| 迁移引发数据损坏风险 | 停止写流量并执行回滚方案 |
 
-## 5. Rollback Steps
-1. Freeze deploy pipeline.
-2. Roll back service version.
-3. Validate endpoints and stream flow.
-4. If schema rollback needed, execute prepared rollback script.
-5. Publish incident timeline with trace samples.
+## 5. 回滚步骤
+1. 暂停部署流水线。
+2. 回滚服务版本。
+3. 验证接口与流式链路。
+4. 如需回滚数据库结构，执行预先准备好的回滚脚本。
+5. 输出带 `trace` 样本的故障时间线。
 
-## 6. Post-Rollback Validation
-- `/cases` and `/sessions/{id}/chat` pass smoke tests.
-- Error ratio returns to baseline.
-- No active lock leak in Redis.
+## 6. 回滚后验证
+- `/cases` 和 `/sessions/{id}/chat` 通过冒烟测试。
+- 错误率恢复到基线范围。
+- Redis 中不存在活跃锁泄漏。

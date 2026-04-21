@@ -1,7 +1,7 @@
-# Observability and Alerting
+# 可观测性与告警
 
-## 1. Structured Log Fields
-Required JSON fields:
+## 1. 结构化日志字段
+必填 JSON 字段：
 - `timestamp`
 - `trace_id`
 - `owner_type`
@@ -10,34 +10,34 @@ Required JSON fields:
 - `event`
 - `duration_ms`
 - `fallback`
-- `error_code` (if any)
+- `error_code`（如有）
 
-## 2. Metrics
-| Metric | Type | Target |
+## 2. 指标
+| 指标 | 类型 | 目标 |
 |---|---|---|
-| active_sse_connections | gauge | monitor trend |
-| chat_first_token_ms | histogram | p95 under threshold |
-| chat_full_response_ms | histogram | p95 under threshold |
-| oh_success_rate | gauge | >= 99% on staging |
-| rate_limited_count | counter | alert on spikes |
-| session_locked_count | counter | alert on spikes |
-| fallback_triggered_count | counter | should be near zero |
+| active_sse_connections | gauge | 关注趋势变化 |
+| chat_first_token_ms | histogram | `p95` 低于阈值 |
+| chat_full_response_ms | histogram | `p95` 低于阈值 |
+| oh_success_rate | gauge | 预发布环境 `>= 99%` |
+| rate_limited_count | counter | 突增时告警 |
+| session_locked_count | counter | 突增时告警 |
+| fallback_triggered_count | counter | 应接近 0 |
 
-## 3. Alert Suggestions
-| Alert | Condition | Severity |
+## 3. 告警建议
+| 告警项 | 条件 | 严重级别 |
 |---|---|---|
-| OpenHarness degraded | `oh_success_rate < 95% for 5m` | high |
-| Stream latency high | `chat_first_token_ms p95 > 3000ms for 10m` | medium |
-| Error burst | `5xx rate > 3% for 5m` | high |
-| Lock conflict burst | `session_locked_count > baseline*3` | medium |
+| OpenHarness 服务退化 | `oh_success_rate < 95% for 5m` | 高 |
+| 流式延迟偏高 | `chat_first_token_ms p95 > 3000ms for 10m` | 中 |
+| 错误突增 | `5xx rate > 3% for 5m` | 高 |
+| 锁冲突突增 | `session_locked_count > baseline*3` | 中 |
 
-## 4. Trace Correlation
-- Propagate `X-Trace-Id` through API -> service -> adapter -> audit.
-- If absent from client, generate UUID at ingress.
+## 4. 链路关联
+- 让 `X-Trace-Id` 在 API -> service -> adapter -> audit 全链路透传。
+- 如果客户端未携带，则在入口生成 UUID。
 
-## 5. Dashboard Layout
-1. Traffic and connection panel
-2. Latency panel (first token / full response)
-3. Error and retry panel
-4. Dependency health panel
-5. Fallback and lock conflict panel
+## 5. 看板布局
+1. 流量与连接数面板
+2. 延迟面板（首 token / 完整回复）
+3. 错误与重试面板
+4. 依赖健康面板
+5. 降级与锁冲突面板

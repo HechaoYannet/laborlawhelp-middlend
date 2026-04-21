@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     oh_lib_max_turns: int = 20
     oh_lib_cwd: str = ""
     oh_lib_tool_policy: str = "legal_minimal"  # legal_minimal / full
+    oh_lib_keep_empty_reasoning_content: bool = False
     oh_connect_timeout_sec: float = 5.0
     oh_read_timeout_sec: float = 60.0
     oh_first_chunk_timeout_sec: float = 15.0

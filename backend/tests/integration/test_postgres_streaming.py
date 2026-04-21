@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from app.adapters.openharness_client import OHChunk
+from app.adapters.openharness import OHChunk
 from app.core import rate_limit
 from app.core.config import settings
 from app.core.errors import AppError
@@ -174,7 +174,7 @@ def test_postgres_session_locked_conflict(postgres_store: PostgresRedisStore, mo
             },
         )
 
-    monkeypatch.setattr("app.services.chat_service.openharness_client.stream_run", slow_stream_run)
+    monkeypatch.setattr("app.modules.chat.service.openharness_client.stream_run", slow_stream_run)
 
     first_response: dict[str, str | int] = {}
 
@@ -221,7 +221,7 @@ def test_postgres_error_path_message_end_and_failed_metadata(
         yield OHChunk(type="text", content="先返回一点文本")
         raise AppError(504, "OH_UPSTREAM_TIMEOUT", "OpenHarness 请求超时", retryable=True)
 
-    monkeypatch.setattr("app.services.chat_service.openharness_client.stream_run", broken_stream_run)
+    monkeypatch.setattr("app.modules.chat.service.openharness_client.stream_run", broken_stream_run)
 
     with client.stream(
         "POST",

@@ -4,7 +4,7 @@ from collections.abc import Generator
 import httpx
 import pytest
 
-from app.adapters.openharness_client import OpenHarnessClient
+from app.adapters.openharness import OpenHarnessClient
 from app.core.config import settings
 from app.core.errors import AppError
 

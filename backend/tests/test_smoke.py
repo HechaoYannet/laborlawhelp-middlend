@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 
-from app.adapters.openharness_client import OHChunk
+from app.adapters.openharness import OHChunk
 from app.core import rate_limit
 from app.core.config import settings
 from app.core.errors import AppError
@@ -196,7 +196,7 @@ def test_stream_error_event_shape_and_failed_assistant_metadata(monkeypatch: pyt
         yield OHChunk(type="text", content="开头文本")
         raise AppError(504, "OH_UPSTREAM_TIMEOUT", "OpenHarness 请求超时", retryable=True)
 
-    monkeypatch.setattr("app.services.chat_service.openharness_client.stream_run", broken_stream_run)
+    monkeypatch.setattr("app.modules.chat.service.openharness_client.stream_run", broken_stream_run)
 
     with client.stream(
         "POST",

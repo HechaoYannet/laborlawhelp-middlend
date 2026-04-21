@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import httpx
+from openai import APIConnectionError, APIError, APITimeoutError
 
 from app.adapters.openharness.enrichment import (
     _build_card_metadata,
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 # Lazy-loaded OpenHarness imports (only needed in library mode)
 _oh_runtime_module = None
 _oh_events_module = None
+_oh_openai_client_patched = False
+_oh_openai_retry_patched = False
 
 
 def _load_oh_modules():
@@ -36,6 +39,107 @@ def _load_oh_modules():
         _oh_runtime_module = _rt
         _oh_events_module = _ev
     return _oh_runtime_module, _oh_events_module
+
+
+def _normalize_assistant_reasoning_content(openai_message: dict) -> dict:
+    if settings.oh_lib_keep_empty_reasoning_content:
+        return openai_message
+    if openai_message.get("role") != "assistant":
+        return openai_message
+    if openai_message.get("reasoning_content") != "":
+        return openai_message
+
+    normalized = dict(openai_message)
+    normalized.pop("reasoning_content", None)
+    return normalized
+
+
+def _patch_openai_assistant_message_conversion() -> None:
+    global _oh_openai_client_patched
+    if _oh_openai_client_patched:
+        return
+
+    from openharness.api import openai_client as oh_openai_client
+
+    original_convert_assistant_message = oh_openai_client._convert_assistant_message
+
+    def patched_convert_assistant_message(msg):
+        openai_message = original_convert_assistant_message(msg)
+        return _normalize_assistant_reasoning_content(openai_message)
+
+    oh_openai_client._convert_assistant_message = patched_convert_assistant_message
+    _oh_openai_client_patched = True
+
+    if not settings.oh_lib_keep_empty_reasoning_content:
+        logger.warning("oh_library_patch drop_empty_reasoning_content_for_assistant_tool_calls enabled")
+
+
+def _is_retryable_openai_stream_error(
+    exc: Exception,
+    original_retryable_checker,
+) -> bool:
+    if original_retryable_checker(exc):
+        return True
+
+    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+        return True
+
+    if isinstance(exc, httpx.TransportError):
+        return True
+
+    if isinstance(exc, APIError):
+        status = getattr(exc, "status_code", None)
+        if status in {408, 409, 429, 500, 502, 503, 504}:
+            return True
+
+    lowered = str(exc).lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "incomplete chunked read",
+            "peer closed connection",
+            "connection reset",
+            "remote protocol error",
+            "stream closed",
+        )
+    )
+
+
+def _patch_openai_retryable_errors() -> None:
+    global _oh_openai_retry_patched
+    if _oh_openai_retry_patched:
+        return
+
+    from openharness.api import openai_client as oh_openai_client
+
+    original_retryable_checker = oh_openai_client.OpenAICompatibleClient._is_retryable
+
+    def patched_retryable_checker(exc: Exception) -> bool:
+        return _is_retryable_openai_stream_error(exc, original_retryable_checker)
+
+    oh_openai_client.OpenAICompatibleClient._is_retryable = staticmethod(patched_retryable_checker)
+    _oh_openai_retry_patched = True
+    logger.warning("oh_library_patch broaden_openai_retryable_stream_errors enabled")
+
+
+def _error_event_to_app_error(message: str, *, recoverable: bool) -> AppError:
+    lowered = (message or "").lower()
+    if "timeout" in lowered or "timed out" in lowered:
+        return AppError(
+            status_code=504,
+            code="OH_UPSTREAM_TIMEOUT",
+            message=message,
+            retryable=recoverable,
+            details={"event_error": message},
+        )
+
+    return AppError(
+        status_code=502,
+        code="OH_SERVICE_ERROR",
+        message=message,
+        retryable=recoverable,
+        details={"event_error": message},
+    )
 
 
 def _apply_tool_policy(bundle: object, policy: str) -> None:
@@ -72,6 +176,70 @@ def _apply_tool_policy(bundle: object, policy: str) -> None:
     )
 
 
+def _register_mcp_tools(bundle: object) -> list[str]:
+    current_registry = getattr(bundle, "tool_registry", None)
+    mcp_manager = getattr(bundle, "mcp_manager", None)
+    if current_registry is None or mcp_manager is None:
+        return []
+
+    from openharness.tools.mcp_tool import McpToolAdapter
+
+    existing_names = {tool.name for tool in current_registry.list_tools()}
+    added_names: list[str] = []
+
+    for tool_info in mcp_manager.list_tools():
+        adapter = McpToolAdapter(mcp_manager, tool_info)
+        if not _tool_allowed_by_policy(adapter.name, settings.oh_lib_tool_policy):
+            continue
+        if adapter.name in existing_names:
+            continue
+        current_registry.register(adapter)
+        existing_names.add(adapter.name)
+        added_names.append(adapter.name)
+
+    engine = getattr(bundle, "engine", None)
+    if engine is not None:
+        setattr(engine, "_tool_registry", current_registry)
+
+    return added_names
+
+
+async def _recover_failed_mcp_connections(bundle: object, *, session_id: str | None) -> None:
+    mcp_manager = getattr(bundle, "mcp_manager", None)
+    if mcp_manager is None:
+        return
+
+    statuses = list(mcp_manager.list_statuses())
+    failed = [status for status in statuses if getattr(status, "state", None) == "failed"]
+    if not failed:
+        return
+
+    logger.warning(
+        "oh_library_mcp_reconnect_attempt session_id=%s failed_servers=%s",
+        session_id or "__default__",
+        ", ".join(f"{status.name}:{status.detail}" for status in failed),
+    )
+
+    try:
+        await mcp_manager.reconnect_all()
+    except Exception:
+        logger.warning(
+            "oh_library_mcp_reconnect_failed session_id=%s",
+            session_id or "__default__",
+            exc_info=True,
+        )
+        return
+
+    added_tool_names = _register_mcp_tools(bundle)
+    refreshed_statuses = list(mcp_manager.list_statuses())
+    logger.warning(
+        "oh_library_mcp_reconnect_complete session_id=%s statuses=%s added_tools=%s",
+        session_id or "__default__",
+        ", ".join(f"{status.name}:{status.state}" for status in refreshed_statuses) or "none",
+        ", ".join(added_tool_names) if added_tool_names else "<none>",
+    )
+
+
 class OpenHarnessClient:
     def __init__(self):
         self._bundles: dict[str, object] = {}  # session_id -> RuntimeBundle
@@ -89,10 +257,13 @@ class OpenHarnessClient:
                 # (which would use CodexApiClient for the default codex profile)
                 api_client = None
                 if settings.oh_lib_api_key and settings.oh_lib_base_url:
+                    _patch_openai_assistant_message_conversion()
+                    _patch_openai_retryable_errors()
                     from openharness.api.openai_client import OpenAICompatibleClient
                     api_client = OpenAICompatibleClient(
                         api_key=settings.oh_lib_api_key,
                         base_url=settings.oh_lib_base_url,
+                        timeout=settings.oh_read_timeout_sec,
                     )
                 bundle = await runtime_mod.build_runtime(
                     model=settings.oh_lib_model or None,
@@ -153,6 +324,7 @@ class OpenHarnessClient:
     ) -> AsyncGenerator[OHChunk, None]:
         _, events_mod = _load_oh_modules()
         bundle = await self._get_or_create_bundle(session_id)
+        await _recover_failed_mcp_connections(bundle, session_id=session_id)
         full_text_parts: list[str] = []
         gathered_references: list[dict[str, str]] = []
         prompt_to_submit = self._augment_prompt(
@@ -227,16 +399,17 @@ class OpenHarnessClient:
                     )
                 elif isinstance(event, events_mod.ErrorEvent):
                     logger.error("oh_library_error trace_id=%s message=%s", trace_id, event.message)
-                    if not event.recoverable:
-                        raise AppError(
-                            status_code=502,
-                            code="OH_SERVICE_ERROR",
-                            message=f"OpenHarness 引擎错误: {event.message}",
-                            retryable=False,
-                        )
+                    raise _error_event_to_app_error(event.message, recoverable=event.recoverable)
         except AppError:
             raise
         except Exception as exc:
+            logger.exception(
+                "oh_library_submit_failed trace_id=%s session_id=%s error_type=%s error=%s",
+                trace_id,
+                session_id or "__default__",
+                type(exc).__name__,
+                exc,
+            )
             # Graceful degradation: when the agent exhausts its turn budget
             # (MaxTurnsExceeded), return whatever text and references have
             # been accumulated so far instead of surfacing a raw error.
