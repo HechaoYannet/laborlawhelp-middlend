@@ -1,5 +1,5 @@
 ---
-name: labor-pkulaw-retrieval-flow
+name: labor-pkulaw-retrieval-flow   
 description: |
   劳动争议智能分诊完整工作流——收集事实、检索法条、本地化计算、生成文书。
   适用于西安/陕西劳动争议场景，使用 PKULaw MCP 工具检索法条，
