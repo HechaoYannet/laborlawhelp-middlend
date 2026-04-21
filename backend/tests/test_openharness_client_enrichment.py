@@ -128,7 +128,7 @@ def test_library_mode_enriches_final_with_pkulaw_references(monkeypatch: pytest.
 
     client = OpenHarnessClient()
     monkeypatch.setattr(client, "_get_or_create_bundle", fake_get_or_create_bundle)
-    monkeypatch.setattr("app.adapters.openharness_client._load_oh_modules", lambda: (object(), fake_events_module))
+    monkeypatch.setattr("app.adapters.openharness.client._load_oh_modules", lambda: (object(), fake_events_module))
 
     chunks = _collect(
         client,
@@ -225,7 +225,7 @@ def test_library_mode_builds_card_metadata_for_local_compensation_tool(monkeypat
 
     client = OpenHarnessClient()
     monkeypatch.setattr(client, "_get_or_create_bundle", fake_get_or_create_bundle)
-    monkeypatch.setattr("app.adapters.openharness_client._load_oh_modules", lambda: (object(), fake_events_module))
+    monkeypatch.setattr("app.adapters.openharness.client._load_oh_modules", lambda: (object(), fake_events_module))
 
     chunks = _collect(client)
     tool_result = next(chunk for chunk in chunks if chunk.type == "tool_result")

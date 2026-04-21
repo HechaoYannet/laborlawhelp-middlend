@@ -82,7 +82,7 @@ def _patch_client(monkeypatch: pytest.MonkeyPatch, responses: list[FakeResponse]
         _ = args
         return FakeAsyncClient(responses=responses, call_counter=call_counter, **kwargs)
 
-    monkeypatch.setattr("app.adapters.openharness_client.httpx.AsyncClient", factory)
+    monkeypatch.setattr("app.adapters.openharness.client.httpx.AsyncClient", factory)
 
 
 def _collect_chunks(client: OpenHarnessClient):

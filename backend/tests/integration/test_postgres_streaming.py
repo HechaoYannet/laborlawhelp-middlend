@@ -10,16 +10,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-import app.core.store as store_module
-import app.services.case_service as case_service_module
-import app.services.chat_service as chat_service_module
-import app.services.session_service as session_service_module
 from app.adapters.openharness_client import OHChunk
 from app.core import rate_limit
 from app.core.config import settings
 from app.core.errors import AppError
-from app.core.store import PostgresRedisStore
 from app.main import app
+from app.modules.storage import InMemoryStore, PostgresRedisStore, set_store
 
 
 def _parse_sse_events(payload: str) -> list[tuple[str, dict]]:
@@ -55,6 +51,7 @@ def _create_case_and_session(client: TestClient, token: str) -> tuple[str, str]:
 
 @pytest.fixture()
 def postgres_store(monkeypatch: pytest.MonkeyPatch) -> Generator[PostgresRedisStore, None, None]:
+    _ = monkeypatch
     database_url = os.getenv("INTEGRATION_DATABASE_URL")
     redis_url = os.getenv("INTEGRATION_REDIS_URL")
     if not database_url or not redis_url:
@@ -96,11 +93,7 @@ def postgres_store(monkeypatch: pytest.MonkeyPatch) -> Generator[PostgresRedisSt
 
     asyncio.run(reset_runtime_state())
     rate_limit._RATE_COUNTER.clear()
-
-    monkeypatch.setattr(store_module, "store", test_store)
-    monkeypatch.setattr(case_service_module, "store", test_store)
-    monkeypatch.setattr(session_service_module, "store", test_store)
-    monkeypatch.setattr(chat_service_module, "store", test_store)
+    set_store(test_store)
 
     yield test_store
 
@@ -117,6 +110,7 @@ def postgres_store(monkeypatch: pytest.MonkeyPatch) -> Generator[PostgresRedisSt
     settings.oh_use_mock = old_oh_mock
     settings.database_url = old_db_url
     settings.redis_url = old_redis_url
+    set_store(InMemoryStore())
 
 
 def test_postgres_stream_success_path_and_trace_consistency(postgres_store: PostgresRedisStore) -> None:
