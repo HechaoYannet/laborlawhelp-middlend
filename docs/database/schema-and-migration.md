@@ -1,4 +1,4 @@
-# Database Schema and Migration Plan（当前实现）
+# 数据库结构与迁移方案（当前实现）
 
 ## 1. 核心表
 - `users`
@@ -7,10 +7,10 @@
 - `messages`
 - `audit_logs`
 
-参考 SQL：`backend/sql/init_schema.sql`
+参考建表脚本：`backend/sql/init_schema.sql`
 
 ## 2. 关系约束
-| From | To | Rule |
+| 来源 | 目标 | 规则 |
 |---|---|---|
 | `cases.user_id` | `users.id` | 匿名阶段可空 |
 | `sessions.case_id` | `cases.id` | 必填 |
@@ -28,7 +28,7 @@
 ## 4. 消息元数据迁移
 当前 `messages` 已包含 `metadata JSONB` 字段。
 
-- 基础 schema：`backend/sql/init_schema.sql`
+- 基础结构脚本：`backend/sql/init_schema.sql`
 - 增量迁移：`backend/sql/migrations/20260419_add_messages_metadata.sql`
 
 增量迁移可安全重复执行（`ADD COLUMN IF NOT EXISTS`）。

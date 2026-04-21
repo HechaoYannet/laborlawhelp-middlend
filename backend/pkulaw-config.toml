@@ -1,0 +1,14 @@
+server_name = "pkulaw_unified_mcp"
+server_version = "0.2.0"
+tool_name_mode = "auto"
+prefix_separator = "__"
+skip_unavailable_services = true
+
+[http_headers]
+Authorization = "Bearer ${PKULAW_MCP_TOKEN}"
+
+[[services]]
+name = "law_search_semantic"
+title = "检索法律法规-语义"
+url = "https://apim-gateway.pkulaw.com/mcp-law-search-service"
+

@@ -1,7 +1,7 @@
 """Local labor-law tools that run inside the middlend process.
 
-These tools are registered into the OpenHarness ToolRegistry so the LLM
-can call them alongside MCP-based PKULaw tools.
+These classes remain the canonical implementation source. OpenHarness
+uses `app.adapters.openharness.local_tools` as its registration bridge.
 """
 
 from app.tools.labor_compensation import LaborCompensationTool

@@ -18,6 +18,7 @@
 | `jwt_secret_key` | `jwt` 必填 | `change-me` | JWT 签名密钥 |
 | `oh_mode` | 是 | `mock` / `library` / `remote` | OpenHarness 运行模式 |
 | `oh_use_mock` | 是 | `true` / `false` | 为 true 时总是 mock |
+| `oh_lib_keep_empty_reasoning_content` | 否 | `false` | library 模式下是否保留 assistant tool-call message 的空 `reasoning_content`；默认建议关闭 |
 | `oh_base_url` | remote 必填 | `http://localhost:8080` | OpenHarness 地址 |
 | `oh_stream_path` | remote 必填 | `/api/v1/stream-run` | OpenHarness 流端点 |
 | `oh_api_key` | remote 必填 | `sk-...` | OpenHarness 凭证 |

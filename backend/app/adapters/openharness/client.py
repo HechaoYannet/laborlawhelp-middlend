@@ -1,16 +1,24 @@
 import asyncio
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
-import ast
 import json
 import logging
-import re
 import time
-from typing import Any
 from pathlib import Path
 
 import httpx
+from openai import APIConnectionError, APIError, APITimeoutError
 
+from app.adapters.openharness.enrichment import (
+    _build_card_metadata,
+    _build_summary,
+    _dedupe_references,
+    _extract_references_from_output,
+    _summarize_tool_result,
+    _tool_allowed_by_policy,
+)
+from app.adapters.openharness.local_tools import ALL_LOCAL_TOOLS
+from app.adapters.openharness.prompting import build_augmented_prompt, resolve_rule_version
+from app.adapters.openharness.types import OHChunk
 from app.core.config import settings
 from app.core.errors import AppError
 
@@ -19,6 +27,8 @@ logger = logging.getLogger(__name__)
 # Lazy-loaded OpenHarness imports (only needed in library mode)
 _oh_runtime_module = None
 _oh_events_module = None
+_oh_openai_client_patched = False
+_oh_openai_retry_patched = False
 
 
 def _load_oh_modules():
@@ -31,299 +41,105 @@ def _load_oh_modules():
     return _oh_runtime_module, _oh_events_module
 
 
-@dataclass
-class OHChunk:
-    type: str
-    content: str | None = None
-    tool_name: str | None = None
-    args: dict | None = None
-    metadata: dict | None = None
+def _normalize_assistant_reasoning_content(openai_message: dict) -> dict:
+    if settings.oh_lib_keep_empty_reasoning_content:
+        return openai_message
+    if openai_message.get("role") != "assistant":
+        return openai_message
+    if openai_message.get("reasoning_content") != "":
+        return openai_message
+
+    normalized = dict(openai_message)
+    normalized.pop("reasoning_content", None)
+    return normalized
 
 
-_URL_PATTERN = re.compile(r"https?://[^\s)>\"]+")
-
-
-def _is_pkulaw_tool(tool_name: str | None) -> bool:
-    if not tool_name:
-        return False
-    lowered = tool_name.lower()
-    return "pkulaw" in lowered or lowered.startswith("mcp__pkulaw__")
-
-
-def _try_parse_structured_output(raw_output: str) -> Any | None:
-    text = (raw_output or "").strip()
-    if not text:
-        return None
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    try:
-        return ast.literal_eval(text)
-    except (ValueError, SyntaxError):
-        return None
-
-
-def _truncate(value: str, *, limit: int = 240) -> str:
-    collapsed = " ".join((value or "").split())
-    if len(collapsed) <= limit:
-        return collapsed
-    return f"{collapsed[: limit - 3]}..."
-
-
-def _walk_reference_candidates(node: Any, bucket: list[dict[str, str]]) -> None:
-    if isinstance(node, dict):
-        title = (
-            node.get("title")
-            or node.get("name")
-            or node.get("docTitle")
-            or node.get("doc_title")
-            or node.get("law_name")
-            or node.get("case_name")
-            or node.get("citation")
-        )
-        url = (
-            node.get("source_url")
-            or node.get("url")
-            or node.get("link")
-            or node.get("href")
-            or node.get("docUrl")
-            or node.get("doc_url")
-        )
-        snippet = (
-            node.get("excerpt")
-            or node.get("snippet")
-            or node.get("summary")
-            or node.get("content")
-            or node.get("description")
-            or node.get("text")
-        )
-        if isinstance(title, str) or isinstance(url, str) or isinstance(snippet, str):
-            bucket.append(
-                {
-                    "title": _truncate(str(title or "")),
-                    "url": str(url or ""),
-                    "snippet": _truncate(str(snippet or ""), limit=320),
-                }
-            )
-        for value in node.values():
-            _walk_reference_candidates(value, bucket)
+def _patch_openai_assistant_message_conversion() -> None:
+    global _oh_openai_client_patched
+    if _oh_openai_client_patched:
         return
 
-    if isinstance(node, list):
-        for item in node:
-            _walk_reference_candidates(item, bucket)
+    from openharness.api import openai_client as oh_openai_client
+
+    original_convert_assistant_message = oh_openai_client._convert_assistant_message
+
+    def patched_convert_assistant_message(msg):
+        openai_message = original_convert_assistant_message(msg)
+        return _normalize_assistant_reasoning_content(openai_message)
+
+    oh_openai_client._convert_assistant_message = patched_convert_assistant_message
+    _oh_openai_client_patched = True
+
+    if not settings.oh_lib_keep_empty_reasoning_content:
+        logger.warning("oh_library_patch drop_empty_reasoning_content_for_assistant_tool_calls enabled")
 
 
-def _normalize_reference(ref: dict[str, str]) -> dict[str, str] | None:
-    title = ref.get("title", "").strip()
-    url = ref.get("url", "").strip()
-    snippet = ref.get("snippet", "").strip()
-    if not title and not url and not snippet:
-        return None
-    return {
-        "title": title,
-        "url": url,
-        "snippet": snippet,
-    }
-
-
-def _extract_references_from_output(raw_output: str, tool_name: str | None) -> list[dict[str, str]]:
-    refs: list[dict[str, str]] = []
-    structured = _try_parse_structured_output(raw_output)
-    if structured is not None:
-        _walk_reference_candidates(structured, refs)
-
-    normalized = []
-    seen: set[tuple[str, str, str]] = set()
-    for item in refs:
-        normalized_item = _normalize_reference(item)
-        if not normalized_item:
-            continue
-        key = (
-            normalized_item["title"].lower(),
-            normalized_item["url"].lower(),
-            normalized_item["snippet"].lower(),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized.append(normalized_item)
-
-    if normalized:
-        return normalized[:8]
-
-    if _is_pkulaw_tool(tool_name):
-        urls = _URL_PATTERN.findall(raw_output or "")
-        lines = [line.strip() for line in (raw_output or "").splitlines() if line.strip()]
-        title = lines[0] if lines else tool_name or "pkulaw_reference"
-        snippet = lines[1] if len(lines) > 1 else _truncate(raw_output or "", limit=200)
-        fallback = _normalize_reference(
-            {
-                "title": _truncate(title),
-                "url": urls[0] if urls else "",
-                "snippet": snippet,
-            }
-        )
-        return [fallback] if fallback else []
-
-    return []
-
-
-def _dedupe_references(references: list[dict[str, str]]) -> list[dict[str, str]]:
-    deduped: list[dict[str, str]] = []
-    seen: set[tuple[str, str, str]] = set()
-    for reference in references:
-        normalized = _normalize_reference(reference)
-        if not normalized:
-            continue
-        key = (
-            normalized["title"].lower(),
-            normalized["url"].lower(),
-            normalized["snippet"].lower(),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(normalized)
-    return deduped[:8]
-
-
-def _summarize_tool_result(
-    tool_name: str | None,
-    raw_output: str,
-    references: list[dict[str, str]],
-    *,
-    is_error: bool,
-) -> str:
-    if is_error:
-        return "tool execution failed"
-    if references:
-        return f"retrieved {len(references)} legal reference(s)"
-    if _is_pkulaw_tool(tool_name):
-        return "pkulaw retrieval completed"
-    return _truncate(raw_output or "ok", limit=120) or "ok"
-
-
-def _build_summary(text: str) -> str:
-    collapsed = " ".join((text or "").split())
-    if not collapsed:
-        return "已完成本轮劳动争议分析。"
-    first_sentence = re.split(r"(?<=[。！？.!?])\s+", collapsed, maxsplit=1)[0].strip()
-    if first_sentence:
-        return _truncate(first_sentence, limit=120)
-    return _truncate(collapsed, limit=120)
-
-
-def _resolve_rule_version(policy_version: str | None) -> str:
-    if policy_version and policy_version.strip():
-        return policy_version.strip()
-    return "labor_consultation.v1"
-
-
-_LOCAL_LABOR_TOOLS = frozenset({
-    "labor_compensation_calc",
-    "labor_document_gen",
-    "labor_fact_extract",
-    "labor_lawyer_recommend",
-})
-
-
-def _safe_json_dict(raw_output: str) -> dict[str, Any] | None:
-    parsed = _try_parse_structured_output(raw_output)
-    if isinstance(parsed, dict):
-        return parsed
-    return None
-
-
-def _build_card_metadata(tool_name: str | None, raw_output: str) -> dict[str, Any] | None:
-    payload = _safe_json_dict(raw_output)
-    if not payload:
-        return None
-
-    if tool_name == "labor_fact_extract":
-        return {
-            "card_type": "fact_summary",
-            "card_title": "要素抽取与案情摘要",
-            "card_payload": {
-                "extracted_facts": payload.get("extracted_facts", {}),
-                "dispute_types": payload.get("dispute_types", []),
-                "info_completeness": payload.get("info_completeness"),
-                "missing_info": payload.get("missing_info", []),
-                "suggested_questions": payload.get("suggested_questions", []),
-                "ready_for_calculation": payload.get("ready_for_calculation"),
-            },
-            "card_actions": [
-                {"action": "continue_consultation", "label": "继续补充案情"},
-            ],
-        }
-
-    if tool_name == "labor_compensation_calc":
-        return {
-            "card_type": "compensation",
-            "card_title": "测算赔偿项目",
-            "card_payload": {
-                "input_summary": payload.get("input_summary", {}),
-                "calculations": payload.get("calculations", []),
-                "total_amount": payload.get("total_amount"),
-                "comparison": payload.get("comparison"),
-                "legal_basis": payload.get("legal_basis", []),
-            },
-            "card_actions": [
-                {"action": "generate_document", "label": "生成文书"},
-                {"action": "copy_summary", "label": "复制测算摘要"},
-            ],
-        }
-
-    if tool_name == "labor_document_gen":
-        document_type = str(payload.get("document_type", ""))
-        card_type = "document"
-        if "证据" in document_type:
-            card_type = "evidence"
-        elif "行动清单" in document_type:
-            card_type = "action_checklist"
-        elif "仲裁申请" in document_type:
-            card_type = "arbitration_application"
-        elif "摘要" in document_type:
-            card_type = "case_summary"
-
-        return {
-            "card_type": card_type,
-            "card_title": "文书生成",
-            "card_payload": payload,
-            "card_actions": [
-                {"action": "copy_document", "label": "复制文书"},
-                {"action": "download_document", "label": "下载文书"},
-            ],
-        }
-
-    if tool_name == "labor_lawyer_recommend":
-        return {
-            "card_type": "lawyer_referral",
-            "card_title": "繁简分流与律师转介",
-            "card_payload": payload,
-            "card_actions": [
-                {"action": "copy_referral", "label": "复制转介摘要"},
-                {"action": "book_lawyer", "label": "预约咨询"},
-            ],
-        }
-
-    return None
-
-
-def _tool_allowed_by_policy(tool_name: str, policy: str) -> bool:
-    normalized = (policy or "").strip().lower()
-    if normalized in {"", "full"}:
+def _is_retryable_openai_stream_error(
+    exc: Exception,
+    original_retryable_checker,
+) -> bool:
+    if original_retryable_checker(exc):
         return True
-    if normalized == "legal_minimal":
-        return (
-            tool_name == "skill"
-            or tool_name == "list_mcp_resources"
-            or tool_name == "read_mcp_resource"
-            or tool_name.startswith("mcp__pkulaw__")
-            or tool_name in _LOCAL_LABOR_TOOLS
+
+    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+        return True
+
+    if isinstance(exc, httpx.TransportError):
+        return True
+
+    if isinstance(exc, APIError):
+        status = getattr(exc, "status_code", None)
+        if status in {408, 409, 429, 500, 502, 503, 504}:
+            return True
+
+    lowered = str(exc).lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "incomplete chunked read",
+            "peer closed connection",
+            "connection reset",
+            "remote protocol error",
+            "stream closed",
         )
-    return True
+    )
+
+
+def _patch_openai_retryable_errors() -> None:
+    global _oh_openai_retry_patched
+    if _oh_openai_retry_patched:
+        return
+
+    from openharness.api import openai_client as oh_openai_client
+
+    original_retryable_checker = oh_openai_client.OpenAICompatibleClient._is_retryable
+
+    def patched_retryable_checker(exc: Exception) -> bool:
+        return _is_retryable_openai_stream_error(exc, original_retryable_checker)
+
+    oh_openai_client.OpenAICompatibleClient._is_retryable = staticmethod(patched_retryable_checker)
+    _oh_openai_retry_patched = True
+    logger.warning("oh_library_patch broaden_openai_retryable_stream_errors enabled")
+
+
+def _error_event_to_app_error(message: str, *, recoverable: bool) -> AppError:
+    lowered = (message or "").lower()
+    if "timeout" in lowered or "timed out" in lowered:
+        return AppError(
+            status_code=504,
+            code="OH_UPSTREAM_TIMEOUT",
+            message=message,
+            retryable=recoverable,
+            details={"event_error": message},
+        )
+
+    return AppError(
+        status_code=502,
+        code="OH_SERVICE_ERROR",
+        message=message,
+        retryable=recoverable,
+        details={"event_error": message},
+    )
 
 
 def _apply_tool_policy(bundle: object, policy: str) -> None:
@@ -360,12 +176,76 @@ def _apply_tool_policy(bundle: object, policy: str) -> None:
     )
 
 
+def _register_mcp_tools(bundle: object) -> list[str]:
+    current_registry = getattr(bundle, "tool_registry", None)
+    mcp_manager = getattr(bundle, "mcp_manager", None)
+    if current_registry is None or mcp_manager is None:
+        return []
+
+    from openharness.tools.mcp_tool import McpToolAdapter
+
+    existing_names = {tool.name for tool in current_registry.list_tools()}
+    added_names: list[str] = []
+
+    for tool_info in mcp_manager.list_tools():
+        adapter = McpToolAdapter(mcp_manager, tool_info)
+        if not _tool_allowed_by_policy(adapter.name, settings.oh_lib_tool_policy):
+            continue
+        if adapter.name in existing_names:
+            continue
+        current_registry.register(adapter)
+        existing_names.add(adapter.name)
+        added_names.append(adapter.name)
+
+    engine = getattr(bundle, "engine", None)
+    if engine is not None:
+        setattr(engine, "_tool_registry", current_registry)
+
+    return added_names
+
+
+async def _recover_failed_mcp_connections(bundle: object, *, session_id: str | None) -> None:
+    mcp_manager = getattr(bundle, "mcp_manager", None)
+    if mcp_manager is None:
+        return
+
+    statuses = list(mcp_manager.list_statuses())
+    failed = [status for status in statuses if getattr(status, "state", None) == "failed"]
+    if not failed:
+        return
+
+    logger.warning(
+        "oh_library_mcp_reconnect_attempt session_id=%s failed_servers=%s",
+        session_id or "__default__",
+        ", ".join(f"{status.name}:{status.detail}" for status in failed),
+    )
+
+    try:
+        await mcp_manager.reconnect_all()
+    except Exception:
+        logger.warning(
+            "oh_library_mcp_reconnect_failed session_id=%s",
+            session_id or "__default__",
+            exc_info=True,
+        )
+        return
+
+    added_tool_names = _register_mcp_tools(bundle)
+    refreshed_statuses = list(mcp_manager.list_statuses())
+    logger.warning(
+        "oh_library_mcp_reconnect_complete session_id=%s statuses=%s added_tools=%s",
+        session_id or "__default__",
+        ", ".join(f"{status.name}:{status.state}" for status in refreshed_statuses) or "none",
+        ", ".join(added_tool_names) if added_tool_names else "<none>",
+    )
+
+
 class OpenHarnessClient:
     def __init__(self):
         self._bundles: dict[str, object] = {}  # session_id -> RuntimeBundle
         self._bundle_lock = asyncio.Lock()
         self._extra_skill_dirs = (
-            Path(__file__).resolve().parents[2] / "agent-skills",
+            Path(__file__).resolve().parents[3] / "agent-skills",
         )
 
     async def _get_or_create_bundle(self, session_id: str | None):
@@ -377,10 +257,13 @@ class OpenHarnessClient:
                 # (which would use CodexApiClient for the default codex profile)
                 api_client = None
                 if settings.oh_lib_api_key and settings.oh_lib_base_url:
+                    _patch_openai_assistant_message_conversion()
+                    _patch_openai_retryable_errors()
                     from openharness.api.openai_client import OpenAICompatibleClient
                     api_client = OpenAICompatibleClient(
                         api_key=settings.oh_lib_api_key,
                         base_url=settings.oh_lib_base_url,
+                        timeout=settings.oh_read_timeout_sec,
                     )
                 bundle = await runtime_mod.build_runtime(
                     model=settings.oh_lib_model or None,
@@ -406,7 +289,6 @@ class OpenHarnessClient:
                 )
                 # Register local labor tools (compensation calc, doc gen, fact extract)
                 try:
-                    from app.tools import ALL_LOCAL_TOOLS
                     for tool in ALL_LOCAL_TOOLS:
                         bundle.tool_registry.register(tool)
                     logger.warning(
@@ -442,6 +324,7 @@ class OpenHarnessClient:
     ) -> AsyncGenerator[OHChunk, None]:
         _, events_mod = _load_oh_modules()
         bundle = await self._get_or_create_bundle(session_id)
+        await _recover_failed_mcp_connections(bundle, session_id=session_id)
         full_text_parts: list[str] = []
         gathered_references: list[dict[str, str]] = []
         prompt_to_submit = self._augment_prompt(
@@ -508,7 +391,7 @@ class OpenHarnessClient:
                         metadata={
                             "summary": _build_summary(full_text),
                             "references": _dedupe_references(gathered_references),
-                            "rule_version": _resolve_rule_version(policy_version),
+                            "rule_version": resolve_rule_version(policy_version),
                             "finish_reason": "stop",
                             "trace_id": trace_id,
                             "retry_count": 0,
@@ -516,16 +399,42 @@ class OpenHarnessClient:
                     )
                 elif isinstance(event, events_mod.ErrorEvent):
                     logger.error("oh_library_error trace_id=%s message=%s", trace_id, event.message)
-                    if not event.recoverable:
-                        raise AppError(
-                            status_code=502,
-                            code="OH_SERVICE_ERROR",
-                            message=f"OpenHarness 引擎错误: {event.message}",
-                            retryable=False,
-                        )
+                    raise _error_event_to_app_error(event.message, recoverable=event.recoverable)
         except AppError:
             raise
         except Exception as exc:
+            logger.exception(
+                "oh_library_submit_failed trace_id=%s session_id=%s error_type=%s error=%s",
+                trace_id,
+                session_id or "__default__",
+                type(exc).__name__,
+                exc,
+            )
+            # Graceful degradation: when the agent exhausts its turn budget
+            # (MaxTurnsExceeded), return whatever text and references have
+            # been accumulated so far instead of surfacing a raw error.
+            if type(exc).__name__ == "MaxTurnsExceeded":
+                full_text = "".join(full_text_parts).strip()
+                logger.warning(
+                    "oh_library_max_turns_graceful trace_id=%s max_turns=%s "
+                    "collected_text_len=%d refs=%d",
+                    trace_id,
+                    getattr(exc, "max_turns", "?"),
+                    len(full_text),
+                    len(gathered_references),
+                )
+                yield OHChunk(
+                    type="final",
+                    metadata={
+                        "summary": _build_summary(full_text),
+                        "references": _dedupe_references(gathered_references),
+                        "rule_version": resolve_rule_version(policy_version),
+                        "finish_reason": "max_turns",
+                        "trace_id": trace_id,
+                        "retry_count": 0,
+                    },
+                )
+                return
             raise AppError(
                 status_code=502,
                 code="OH_SERVICE_ERROR",
@@ -589,45 +498,13 @@ class OpenHarnessClient:
         policy_version: str | None,
         client_capabilities: list[str],
     ) -> str:
-        instructions = [
-            "你是「智裁」劳动争议智能分诊助手，专注服务西安/陕西地区劳动者。",
-            "若可用工具中存在 skill，请先调用 skill(name=\"labor_pkulaw_retrieval_flow\")，严格遵循其中规定的分阶段工作流。",
-
-            # --- 工具使用规则 ---
-            "【工具使用规则】",
-            "如可用工具中存在 mcp__pkulaw__get_article 和 mcp__pkulaw__search_article，必须先使用它们检索法条原文，再输出法律依据。",
-            "使用 mcp__pkulaw__get_article 时，title 用法律全称（如'中华人民共和国劳动合同法'），number 用'第XX条'格式。",
-            "使用 mcp__pkulaw__search_article 时，text 参数必须包含'陕西'或'陕高法'等地域关键词以获取本地规则。",
-            "赔偿/补偿金额必须通过 labor_compensation_calc 工具计算，禁止心算或估算。",
-            "信息收集充分后调用 labor_fact_extract 进行事实结构化，用其结果驱动后续计算和文书生成。",
-            "需要生成文书时调用 labor_document_gen（仲裁申请书/证据清单/行动清单/案情摘要）。",
-
-            # --- 陕西本地规则 ---
-            "【陕西本地规则（关键）】",
-            "陕西省经济补偿月工资基数按劳动者实际到手工资计算，非税前工资（依据：陕高法〔2020〕118号第18条）。",
-            "到手工资 = 扣除社保个人部分 + 个人所得税后的银行实发金额。",
-            "必须主动询问用户的到手工资金额，这是陕西地区计算赔偿的核心数据。",
-            "计算时同时展示陕西标准（到手工资）和全国标准（税前工资）的对比差异。",
-
-            # --- 输出要求 ---
-            "【输出要求】",
-            "金额、赔偿测算、时效边界不得伪造；若信息不足，必须说明假设或缺失字段。",
-            "引用法条必须来自 PKULaw 工具检索结果，不得编造法条编号或案例号。",
-            "回答采用结构化格式：案情摘要→法律分析→赔偿计算表→维权建议→风险提示→法律依据引用。",
-            "重要法律概念采用双层输出：先用通俗语言解释，再给出专业法律表述。",
-            "最终回答覆盖：简要结论、事实要点、维权步骤、法律依据、是否建议律师介入。",
-        ]
-        if locale:
-            instructions.append(f"回复语言优先使用：{locale}。")
-        if policy_version:
-            instructions.append(f"规则版本偏好：{policy_version}。")
-        if client_capabilities:
-            instructions.append(f"前端能力声明：{', '.join(client_capabilities)}。")
-        if not has_pkulaw:
-            instructions.append('⚠️ 当前未检测到 PKULaw MCP 工具；如无法核验法律依据，请明确标注"法律依据待在线核验，以下结论仅供参考"。')
-
-        joined = "\n".join(f"- {line}" for line in instructions)
-        return f"[Middleware Instructions]\n{joined}\n\n[User Request]\n{prompt.strip()}"
+        return build_augmented_prompt(
+            prompt,
+            has_pkulaw=has_pkulaw,
+            locale=locale,
+            policy_version=policy_version,
+            client_capabilities=client_capabilities,
+        )
 
     def _upstream_error(self, code: str, *, retryable: bool, details: dict | None = None) -> AppError:
         messages = {

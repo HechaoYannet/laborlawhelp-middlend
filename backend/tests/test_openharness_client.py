@@ -4,7 +4,7 @@ from collections.abc import Generator
 import httpx
 import pytest
 
-from app.adapters.openharness_client import OpenHarnessClient
+from app.adapters.openharness import OpenHarnessClient
 from app.core.config import settings
 from app.core.errors import AppError
 
@@ -82,7 +82,7 @@ def _patch_client(monkeypatch: pytest.MonkeyPatch, responses: list[FakeResponse]
         _ = args
         return FakeAsyncClient(responses=responses, call_counter=call_counter, **kwargs)
 
-    monkeypatch.setattr("app.adapters.openharness_client.httpx.AsyncClient", factory)
+    monkeypatch.setattr("app.adapters.openharness.client.httpx.AsyncClient", factory)
 
 
 def _collect_chunks(client: OpenHarnessClient):

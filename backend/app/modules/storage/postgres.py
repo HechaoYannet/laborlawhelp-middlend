@@ -1,10 +1,6 @@
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from contextlib import asynccontextmanager
-import asyncio
 import json
-from uuid import UUID
-from uuid import uuid4
+from contextlib import asynccontextmanager
+from uuid import UUID, uuid4
 
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -12,252 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.core.config import settings
 from app.core.errors import AppError
-
-
-@dataclass
-class CaseRecord:
-    id: str
-    owner_type: str
-    owner_id: str
-    title: str
-    region_code: str
-    status: str = "active"
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-@dataclass
-class SessionRecord:
-    id: str
-    case_id: str
-    owner_type: str
-    owner_id: str
-    status: str = "active"
-    openharness_session_id: str | None = None
-    message_count: int = 0
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    last_active_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-@dataclass
-class MessageRecord:
-    id: str
-    session_id: str
-    role: str
-    content: str
-    metadata: dict | None = None
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-@dataclass
-class AuditLogRecord:
-    trace_id: str
-    owner_type: str
-    owner_id: str
-    session_id: str
-    event_type: str
-    request_payload: dict
-    response_summary: str
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-def _to_iso(value: str | datetime) -> str:
-    if isinstance(value, datetime):
-        return value.astimezone(timezone.utc).isoformat()
-    return value
-
-
-class BaseStore:
-    async def create_case(self, owner_type: str, owner_id: str, title: str, region_code: str) -> CaseRecord:
-        raise NotImplementedError
-
-    async def list_cases(self, owner_type: str, owner_id: str) -> list[CaseRecord]:
-        raise NotImplementedError
-
-    async def get_case(self, case_id: str) -> CaseRecord | None:
-        raise NotImplementedError
-
-    async def create_session(self, case_id: str, owner_type: str, owner_id: str) -> SessionRecord:
-        raise NotImplementedError
-
-    async def list_sessions(self, case_id: str, owner_type: str, owner_id: str) -> list[SessionRecord]:
-        raise NotImplementedError
-
-    async def get_session(self, session_id: str) -> SessionRecord | None:
-        raise NotImplementedError
-
-    async def end_session(self, session_id: str) -> SessionRecord | None:
-        raise NotImplementedError
-
-    async def save_message(
-        self,
-        session_id: str,
-        role: str,
-        content: str,
-        message_id: str | None = None,
-        metadata: dict | None = None,
-    ) -> MessageRecord:
-        raise NotImplementedError
-
-    async def save_audit_log(
-        self,
-        *,
-        trace_id: str,
-        owner_type: str,
-        owner_id: str,
-        session_id: str,
-        event_type: str,
-        request_payload: dict,
-        response_summary: str,
-    ) -> AuditLogRecord:
-        raise NotImplementedError
-
-    async def list_audit_logs(self, session_id: str) -> list[AuditLogRecord]:
-        raise NotImplementedError
-
-    async def list_messages(self, session_id: str) -> list[MessageRecord]:
-        raise NotImplementedError
-
-    async def update_session_activity(self, session_id: str, message_increment: int) -> None:
-        raise NotImplementedError
-
-    async def next_stream_seq(self, session_id: str) -> int:
-        raise NotImplementedError
-
-    @asynccontextmanager
-    async def acquire_session_lock(self, session_id: str):
-        raise NotImplementedError
-
-
-class InMemoryStore(BaseStore):
-    def __init__(self) -> None:
-        self.cases: dict[str, CaseRecord] = {}
-        self.sessions: dict[str, SessionRecord] = {}
-        self.messages: list[MessageRecord] = []
-        self.audit_logs: list[AuditLogRecord] = []
-        self.session_locks: dict[str, asyncio.Lock] = {}
-        self.stream_seq: dict[str, int] = {}
-
-    def new_id(self) -> str:
-        return str(uuid4())
-
-    def get_lock(self, session_id: str) -> asyncio.Lock:
-        if session_id not in self.session_locks:
-            self.session_locks[session_id] = asyncio.Lock()
-        return self.session_locks[session_id]
-
-    async def create_case(self, owner_type: str, owner_id: str, title: str, region_code: str) -> CaseRecord:
-        case_id = self.new_id()
-        record = CaseRecord(id=case_id, owner_type=owner_type, owner_id=owner_id, title=title, region_code=region_code)
-        self.cases[case_id] = record
-        return record
-
-    async def list_cases(self, owner_type: str, owner_id: str) -> list[CaseRecord]:
-        return [c for c in self.cases.values() if c.owner_type == owner_type and c.owner_id == owner_id]
-
-    async def get_case(self, case_id: str) -> CaseRecord | None:
-        return self.cases.get(case_id)
-
-    async def create_session(self, case_id: str, owner_type: str, owner_id: str) -> SessionRecord:
-        session_id = self.new_id()
-        openharness_session_id = self.new_id()
-        session = SessionRecord(
-            id=session_id,
-            case_id=case_id,
-            owner_type=owner_type,
-            owner_id=owner_id,
-            openharness_session_id=openharness_session_id,
-        )
-        self.sessions[session_id] = session
-        return session
-
-    async def list_sessions(self, case_id: str, owner_type: str, owner_id: str) -> list[SessionRecord]:
-        return [
-            s
-            for s in self.sessions.values()
-            if s.case_id == case_id and s.owner_type == owner_type and s.owner_id == owner_id
-        ]
-
-    async def get_session(self, session_id: str) -> SessionRecord | None:
-        return self.sessions.get(session_id)
-
-    async def end_session(self, session_id: str) -> SessionRecord | None:
-        session = self.sessions.get(session_id)
-        if not session:
-            return None
-        session.status = "ended"
-        session.last_active_at = datetime.now(timezone.utc).isoformat()
-        return session
-
-    async def save_message(
-        self,
-        session_id: str,
-        role: str,
-        content: str,
-        message_id: str | None = None,
-        metadata: dict | None = None,
-    ) -> MessageRecord:
-        msg = MessageRecord(
-            id=message_id or self.new_id(),
-            session_id=session_id,
-            role=role,
-            content=content,
-            metadata=metadata,
-        )
-        self.messages.append(msg)
-        return msg
-
-    async def list_messages(self, session_id: str) -> list[MessageRecord]:
-        return [m for m in self.messages if m.session_id == session_id]
-
-    async def save_audit_log(
-        self,
-        *,
-        trace_id: str,
-        owner_type: str,
-        owner_id: str,
-        session_id: str,
-        event_type: str,
-        request_payload: dict,
-        response_summary: str,
-    ) -> AuditLogRecord:
-        record = AuditLogRecord(
-            trace_id=trace_id,
-            owner_type=owner_type,
-            owner_id=owner_id,
-            session_id=session_id,
-            event_type=event_type,
-            request_payload=request_payload,
-            response_summary=response_summary,
-        )
-        self.audit_logs.append(record)
-        return record
-
-    async def list_audit_logs(self, session_id: str) -> list[AuditLogRecord]:
-        return [log for log in self.audit_logs if log.session_id == session_id]
-
-    async def update_session_activity(self, session_id: str, message_increment: int) -> None:
-        session = self.sessions.get(session_id)
-        if not session:
-            return
-        session.last_active_at = datetime.now(timezone.utc).isoformat()
-        session.message_count += message_increment
-
-    async def next_stream_seq(self, session_id: str) -> int:
-        current = self.stream_seq.get(session_id, 0) + 1
-        self.stream_seq[session_id] = current
-        return current
-
-    @asynccontextmanager
-    async def acquire_session_lock(self, session_id: str):
-        lock = self.get_lock(session_id)
-        if lock.locked():
-            raise AppError(409, "SESSION_LOCKED", "同一会话有并发消息冲突", retryable=True)
-        await lock.acquire()
-        try:
-            yield
-        finally:
-            lock.release()
+from app.modules.storage.protocol import BaseStore
+from app.modules.storage.records import AuditLogRecord, CaseRecord, MessageRecord, SessionRecord, to_iso
 
 
 class PostgresRedisStore(BaseStore):
@@ -333,8 +85,8 @@ class PostgresRedisStore(BaseStore):
                 title=str(row["title"]),
                 region_code=str(row["region_code"]),
                 status=str(row["status"]),
-                created_at=_to_iso(row["created_at"]),
-                updated_at=_to_iso(row["updated_at"]),
+                created_at=to_iso(row["created_at"]),
+                updated_at=to_iso(row["updated_at"]),
             )
             for row in rows
         ]
@@ -363,8 +115,8 @@ class PostgresRedisStore(BaseStore):
             title=str(row["title"]),
             region_code=str(row["region_code"]),
             status=str(row["status"]),
-            created_at=_to_iso(row["created_at"]),
-            updated_at=_to_iso(row["updated_at"]),
+            created_at=to_iso(row["created_at"]),
+            updated_at=to_iso(row["updated_at"]),
         )
 
     async def create_session(self, case_id: str, owner_type: str, owner_id: str) -> SessionRecord:
@@ -445,8 +197,8 @@ class PostgresRedisStore(BaseStore):
                 status=str(row["status"]),
                 openharness_session_id=row["openharness_session_id"],
                 message_count=int(row["message_count"]),
-                created_at=_to_iso(row["created_at"]),
-                last_active_at=_to_iso(row["last_active_at"]),
+                created_at=to_iso(row["created_at"]),
+                last_active_at=to_iso(row["last_active_at"]),
             )
             for row in rows
         ]
@@ -477,8 +229,8 @@ class PostgresRedisStore(BaseStore):
             status=str(row["status"]),
             openharness_session_id=row["openharness_session_id"],
             message_count=int(row["message_count"]),
-            created_at=_to_iso(row["created_at"]),
-            last_active_at=_to_iso(row["last_active_at"]),
+            created_at=to_iso(row["created_at"]),
+            last_active_at=to_iso(row["last_active_at"]),
         )
 
     async def end_session(self, session_id: str) -> SessionRecord | None:
@@ -504,7 +256,7 @@ class PostgresRedisStore(BaseStore):
         message_id: str | None = None,
         metadata: dict | None = None,
     ) -> MessageRecord:
-        mid = message_id or str(uuid4())
+        message_id = message_id or str(uuid4())
         engine = await self._engine_ref()
         async with engine.begin() as conn:
             await conn.execute(
@@ -515,14 +267,14 @@ class PostgresRedisStore(BaseStore):
                     """
                 ),
                 {
-                    "id": mid,
+                    "id": message_id,
                     "session_id": session_id,
                     "role": role,
                     "content": content,
                     "metadata": None if metadata is None else json.dumps(metadata, ensure_ascii=False),
                 },
             )
-        return MessageRecord(id=mid, session_id=session_id, role=role, content=content, metadata=metadata)
+        return MessageRecord(id=message_id, session_id=session_id, role=role, content=content, metadata=metadata)
 
     async def list_messages(self, session_id: str) -> list[MessageRecord]:
         engine = await self._engine_ref()
@@ -546,7 +298,7 @@ class PostgresRedisStore(BaseStore):
                 role=str(row["role"]),
                 content=str(row["content"]),
                 metadata=row["metadata"],
-                created_at=_to_iso(row["created_at"]),
+                created_at=to_iso(row["created_at"]),
             )
             for row in rows
         ]
@@ -653,7 +405,7 @@ class PostgresRedisStore(BaseStore):
                     event_type=str(row["event_type"]),
                     request_payload=request_payload if isinstance(request_payload, dict) else {},
                     response_summary=str(row["response_summary"] or ""),
-                    created_at=_to_iso(row["created_at"]),
+                    created_at=to_iso(row["created_at"]),
                 )
             )
         return records
@@ -695,13 +447,3 @@ class PostgresRedisStore(BaseStore):
                 await lock.release()
             except Exception:
                 pass
-
-
-def build_store() -> BaseStore:
-    backend = settings.storage_backend.lower().strip()
-    if backend == "postgres":
-        return PostgresRedisStore()
-    return InMemoryStore()
-
-
-store = build_store()

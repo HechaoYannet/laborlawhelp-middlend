@@ -1,47 +1,61 @@
-# Frontend Integration Guide (Next.js)
+# 前端接入指南（Next.js）
 
-## 1. Lifecycle (Must Follow)
+## 1. 接入生命周期（必须遵守）
 1. `POST /cases`
 2. `POST /cases/{case_id}/sessions`
-3. `POST /sessions/{session_id}/chat/stream` and parse stream
+3. `POST /sessions/{session_id}/chat/stream` 并解析流
 
-Chat is forbidden before session creation.
+在 `session` 创建完成前，不允许直接发起聊天。
 
-## 2. Client State Model
-| State | Required Fields |
+## 2. 当前前端接入实现
+仓库内已经提供一套以当前中间件为准的前端 SDK：
+
+| 文件 | 作用 |
 |---|---|
-| owner | `owner_type`, `anonymous_token` or JWT |
+| `frontend-sdk/core/http.ts` | 统一构造匿名/JWT 请求头并发起 JSON 请求 |
+| `frontend-sdk/core/sse.ts` | 解析中间件 SSE 帧 |
+| `frontend-sdk/modules/auth.ts` | 认证端点调用 |
+| `frontend-sdk/modules/case-session.ts` | 案件、会话、消息列表与结束会话调用 |
+| `frontend-sdk/modules/chat.ts` | 聊天流式调用 |
+| `frontend-sdk/stream-chat.ts` | 匿名场景的兼容包装入口 |
+
+如果前端仓库直接对接 middlend，优先复用这套 SDK，而不是在业务页面里手写 `fetch + SSE` 主链路。
+
+## 3. 客户端状态模型
+| 状态 | 必需字段 |
+|---|---|
+| owner | `owner_type`、`anonymous_token` 或 JWT |
 | case | `case_id`, `title`, `region_code` |
 | session | `session_id`, `status`, `last_active_at` |
 | stream | `current_message_id`, `trace_id`, `last_seq`, `is_streaming` |
 
-## 3. Stream Parser Requirements
-- Use `fetch` + `ReadableStream` (POST).
-- Parse SSE by frame separator `\n\n`.
-- Handle UTF-8 split chunks safely with `TextDecoder` streaming mode.
-- Dispatch by `event` type.
-- Keep monotonic `seq`; drop duplicated or older deltas.
-- Ignore unknown events and unknown fields for forward compatibility.
-- Treat `message_end` as the only stream completion signal for one assistant turn.
+## 4. 流解析要求
+- 使用 `fetch` + `ReadableStream` 发起 `POST` 请求。
+- 按 SSE 帧分隔符 `\n\n` 解析数据。
+- 使用 `TextDecoder` 的 streaming 模式安全处理 UTF-8 分片。
+- 按 `event` 类型分发事件。
+- 保持 `seq` 单调递增；丢弃重复或更旧的 delta。
+- 忽略未知事件和未知字段，以保持向前兼容。
+- 仅把 `message_end` 视为单轮助手回复完成信号。
 
-## 4. Event Contract and UI Handling
-| Event | Required Fields | UI Action |
+## 5. 事件契约与 UI 处理
+| 事件 | 必需字段 | UI 处理 |
 |---|---|---|
-| `message_start` | `message_id`, `trace_id` | Create pending assistant bubble |
-| `content_delta` | `delta`, `seq`, `trace_id` | Append token text by seq |
-| `tool_call` | `tool_name`, `trace_id` | Show status badge "处理中" |
-| `tool_result` | `tool_name`, `result_summary`, `references`, `trace_id` | Update status and render cards when `card_type/card_payload` exists |
-| `final` | `message_id`, `summary`, `references`, `rule_version`, `finish_reason`, `trace_id` | Fill summary/reference/sidebar data |
-| `error` | `code`, `message`, `retryable`, `trace_id` | Mark retryable error without dropping received content |
-| `message_end` | `message_id`, `trace_id` | Mark assistant message complete |
+| `message_start` | `message_id`, `trace_id` | 创建待完成的助手消息气泡 |
+| `content_delta` | `delta`, `seq`, `trace_id` | 按 `seq` 追加 token 文本 |
+| `tool_call` | `tool_name`, `trace_id` | 显示“处理中”状态标记 |
+| `tool_result` | `tool_name`, `result_summary`, `references`, `trace_id` | 更新状态，并在存在 `card_type/card_payload` 时渲染卡片 |
+| `final` | `message_id`, `summary`, `references`, `rule_version`, `finish_reason`, `trace_id` | 填充摘要、引用和侧边栏数据 |
+| `error` | `code`, `message`, `retryable`, `trace_id` | 标记可重试错误，同时保留已收到内容 |
+| `message_end` | `message_id`, `trace_id` | 标记助手消息完成 |
 
-`tool_result` optional extension fields:
+`tool_result` 可选扩展字段：
 - `card_type`
 - `card_title`
 - `card_payload`
 - `card_actions`
 
-## 5. TypeScript Example
+## 6. 示例代码（TypeScript）
 
 ```ts
 export async function streamChat(
@@ -88,19 +102,20 @@ export async function streamChat(
       try {
         onEvent(event, JSON.parse(raw))
       } catch {
-        // Skip malformed frame and keep stream alive.
+        // 忽略损坏帧，保持流继续解析。
       }
     }
   }
 }
 ```
 
-## 6. Reconnect and Seq Policy
-- Client keeps `last_seq` in memory for the active stream.
-- On reconnect, send a new `client_seq` turn and recover history via `GET /sessions/{session_id}/messages`.
-- UI must treat each turn as append-only by `seq`.
+## 7. 重连与 `seq` 策略
+- 客户端在当前活跃流内维护 `last_seq`。
+- 重连时发送新的 `client_seq` 轮次，并通过 `GET /sessions/{session_id}/messages` 恢复历史。
+- 如果 `GET /sessions/{session_id}/messages` 返回 `404 SESSION_NOT_FOUND`，应将本地 `session` 视为过期并重新创建 `case/session`。
+- UI 必须按 `seq` 将每一轮视为只追加数据。
 
-## 7. Production Path Policy
-- Consultation production path is middleware-only.
-- Local rule modules can be kept for offline development, but must not auto-replace online SSE results.
-- Any stream failure should follow `error` + `message_end` handling and expose retry UX.
+## 8. 生产路径策略
+- 咨询场景的生产路径仅走 middlend。
+- 本地规则模块可以保留用于离线开发，但不能自动替代线上 SSE 结果。
+- 任何流式失败都应按 `error` + `message_end` 处理，并向用户暴露重试交互。

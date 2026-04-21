@@ -10,19 +10,22 @@
 | Core | 认证、错误、配置、限流、SSE 编码 |
 
 ## 2. 当前主要模块
-- `app/api/v1/routes/cases.py`
-- `app/api/v1/routes/sessions.py`
-- `app/api/v1/routes/chat.py`
-- `app/api/v1/routes/auth.py`
-- `app/api/v1/routes/playground.py`
-- `app/services/case_service.py`
-- `app/services/session_service.py`
-- `app/services/chat_service.py`
-- `app/services/audit_service.py`
-- `app/adapters/openharness_client.py`
-- `app/core/store.py`
-- `app/core/auth.py`
-- `app/core/jwt_utils.py`
+- `app/api/v1/router.py`
+- `app/modules/auth/router.py`
+- `app/modules/auth/context.py`
+- `app/modules/auth/tokens.py`
+- `app/modules/case_session/router.py`
+- `app/modules/case_session/service.py`
+- `app/modules/chat/router.py`
+- `app/modules/chat/service.py`
+- `app/modules/chat/audit.py`
+- `app/modules/playground/router.py`
+- `app/modules/storage/factory.py`
+- `app/modules/storage/postgres.py`
+- `app/modules/storage/memory.py`
+- `app/adapters/openharness/client.py`
+- `app/adapters/openharness/prompting.py`
+- `app/adapters/openharness/enrichment.py`
 - `app/core/rate_limit.py`
 
 ## 3. 聊天链路（已实现）
