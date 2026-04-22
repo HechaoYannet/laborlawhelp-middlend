@@ -9,3 +9,5 @@ sqlalchemy==2.0.41
 asyncpg==0.30.0
 redis==6.2.0
 PyJWT==2.10.1
+sse-starlette==2.4.1
+starlette==0.47.3
